@@ -8,10 +8,10 @@
 		<version>3.5.15</version>
 		<relativePath/> <!-- lookup parent from repository -->
 	</parent>
-	<groupId>com.omniai</groupId>
-	<artifactId>omniai-admin</artifactId>
+	<groupId>com.mixinfer</groupId>
+	<artifactId>mixinfer-admin</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
-	<name>omniai-admin</name>
+	<name>mixinfer-admin</name>
 	<description/>
 	<url/>
 	<licenses>
