@@ -1,10 +1,28 @@
-HELP.md
+# ----------------------------------------------------------------------
+# 根目录级别的忽略 (适用于所有子工程)
+# ----------------------------------------------------------------------
+# 通用编译输出
 target/
+build/
+dist/
+node_modules/
+
+# Mac/OSX 系统缓存文件
+.DS_Store
+
+# ----------------------------------------------------------------------
+# Java / Maven (如 mixinfer-admin)
+# ----------------------------------------------------------------------
 .mvn/wrapper/maven-wrapper.jar
 !**/src/main/**/target/
 !**/src/test/**/target/
+!**/src/main/**/build/
+!**/src/test/**/build/
 
-### STS ###
+# ----------------------------------------------------------------------
+# IDE 配置文件 (强烈建议忽略，避免团队协作时冲突)
+# ----------------------------------------------------------------------
+### Eclipse / STS ###
 .apt_generated
 .classpath
 .factorypath
@@ -14,20 +32,22 @@ target/
 .sts4-cache
 
 ### IntelliJ IDEA ###
-.idea
+.idea/
 *.iws
 *.iml
 *.ipr
 
-### NetBeans ###
-/nbproject/private/
-/nbbuild/
-/dist/
-/nbdist/
-/.nb-gradle/
-build/
-!**/src/main/**/build/
-!**/src/test/**/build/
-
 ### VS Code ###
 .vscode/
+
+# ----------------------------------------------------------------------
+# 环境与日志文件 (极其重要，防止密钥泄露)
+# ----------------------------------------------------------------------
+*.log
+*.log.*
+logs/
+.env
+.env.local
+.env.*
+application-local.yml
+application-local.properties
