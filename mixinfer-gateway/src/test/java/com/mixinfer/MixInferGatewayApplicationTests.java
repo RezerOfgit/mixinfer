@@ -1,10 +1,10 @@
-package com.omniai;
+package com.mixinfer;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 
 @SpringBootTest
-class OmniaiAdminApplicationTests {
+class MixInferGatewayApplicationTests {
 
 	@Test
 	void contextLoads() {

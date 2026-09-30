@@ -14,10 +14,6 @@ node_modules/
 # Java / Maven (如 mixinfer-admin)
 # ----------------------------------------------------------------------
 .mvn/wrapper/maven-wrapper.jar
-!**/src/main/**/target/
-!**/src/test/**/target/
-!**/src/main/**/build/
-!**/src/test/**/build/
 
 # ----------------------------------------------------------------------
 # IDE 配置文件 (强烈建议忽略，避免团队协作时冲突)

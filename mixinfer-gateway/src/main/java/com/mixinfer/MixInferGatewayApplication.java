@@ -4,10 +4,10 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
 @SpringBootApplication
-public class MixInferAdminApplication {
+public class MixInferGatewayApplication {
 
 	public static void main(String[] args) {
-		SpringApplication.run(MixInferAdminApplication.class, args);
+		SpringApplication.run(MixInferGatewayApplication.class, args);
 	}
 
 }
