@@ -12,7 +12,7 @@ mixinfer:
   providers:
     - name: openai-compatible
       base-url: https://api.openai.com/v1
-      api-key: ${OPENAI_API_KEY:}
+      api-key: ${OPENAI_API_KEY:sk-test-placeholder}
       models:
         - gpt-4o-mini
   routes:

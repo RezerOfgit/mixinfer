@@ -102,6 +102,16 @@
                     </execution>
                 </executions>
             </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <!-- 关闭 JVM 类数据共享(CDS)，消除 Lombok 注解处理器导致的
+                     "Sharing is only supported for boot loader classes" 警告。
+                     仅为消除警告，不影响功能；升级 Lombok 后可移除。 -->
+                    <argLine>-Xshare:off</argLine>
+                </configuration>
+            </plugin>
         </plugins>
     </build>
 
