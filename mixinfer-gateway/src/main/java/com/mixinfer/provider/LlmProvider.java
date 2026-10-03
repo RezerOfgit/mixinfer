@@ -2,7 +2,7 @@ package com.mixinfer.provider;
 
 import com.mixinfer.domain.LlmRequest;
 import com.mixinfer.domain.LlmResponse;
-import jakarta.websocket.Endpoint;
+import com.mixinfer.router.Endpoint;
 
 /**
  * SPI for a specific kind of upstream LLM provider.

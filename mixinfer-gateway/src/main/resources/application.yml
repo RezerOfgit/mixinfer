@@ -11,12 +11,12 @@ mixinfer:
       name: default
   providers:
     - name: openai-compatible
-      base-url: https://api.openai.com/v1
-      api-key: ${OPENAI_API_KEY:sk-test-placeholder}
+      base-url: https://api.deepseek.com
+      api-key: ${DEEPSEEK_API_KEY:}
       models:
-        - gpt-4o-mini
+        - deepseek-flash
   routes:
-    - model: gpt-4o-mini
+    - model:  deepseek-flash
       provider: openai-compatible
 
 logging:

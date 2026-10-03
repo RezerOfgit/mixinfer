@@ -1,12 +1,7 @@
 package com.mixinfer.converter;
 
-import com.mixinfer.domain.ContentPart;
-import com.mixinfer.domain.LlmChoice;
-import com.mixinfer.domain.LlmResponse;
-import com.mixinfer.openai.OpenAIChatResponse;
-import com.mixinfer.openai.OpenAIChoice;
-import com.mixinfer.openai.OpenAIMessage;
-import com.mixinfer.openai.OpenAIUsage;
+import com.mixinfer.domain.*;
+import com.mixinfer.openai.*;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
@@ -58,5 +53,28 @@ public class LlmToOpenAIConverter {
                 .filter(p -> p instanceof ContentPart.TextPart)
                 .map(p -> ((ContentPart.TextPart) p).text())
                 .collect(Collectors.joining());
+    }
+
+    public OpenAIChatRequest toOpenAIRequest(LlmRequest source) {
+        OpenAIChatRequest target = new OpenAIChatRequest();
+        target.setModel(source.getModel());
+        target.setTemperature(source.getTemperature());
+        target.setMaxTokens(source.getMaxTokens());
+        target.setStream(Boolean.TRUE.equals(source.getStream()));
+        target.setMessages(source.getMessages().stream()
+                .map(this::toOpenAIMessage)
+                .toList());
+        return target;
+    }
+
+    private OpenAIMessage toOpenAIMessage(LlmMessage source) {
+        String content = source.getContent() == null
+                ? null
+                : source.getContent().stream()
+                  .filter(p -> p instanceof ContentPart.TextPart)
+                  .map(p -> ((ContentPart.TextPart) p).text())
+                  .collect(Collectors.joining());
+
+        return new OpenAIMessage(source.getRole(), content);
     }
 }
