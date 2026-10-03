@@ -4,13 +4,16 @@ import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
 import okhttp3.mockwebserver.RecordedRequest;
 import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.boot.test.web.server.LocalServerPort;
-import org.springframework.http.*;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
@@ -24,29 +27,33 @@ import static org.assertj.core.api.Assertions.assertThat;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class ChatCompletionIntegrationTest {
 
+    static MockWebServer mockUpstream;
+
     @LocalServerPort
     int port;
 
     @Autowired
     TestRestTemplate restTemplate;
 
-    static MockWebServer mockUpstream;
-
-    @BeforeAll
-    static void startMock() throws IOException {
+    @DynamicPropertySource
+    static void overrideProperties(DynamicPropertyRegistry registry) throws IOException {
         mockUpstream = new MockWebServer();
         mockUpstream.start();
+
+        String mockBaseUrl = mockUpstream.url("/v1").toString().replaceAll("/$", "");
+
+        registry.add("mixinfer.providers[0].name", () -> "openai-compatible");
+        registry.add("mixinfer.providers[0].base-url", () -> mockBaseUrl);
+        registry.add("mixinfer.providers[0].api-key", () -> "test-api-key");
+        registry.add("mixinfer.routes[0].model", () -> "gpt-4o-mini");
+        registry.add("mixinfer.routes[0].provider", () -> "openai-compatible");
     }
 
     @AfterAll
     static void stopMock() throws IOException {
-        mockUpstream.shutdown();
-    }
-
-    @DynamicPropertySource
-    static void overrideProperties(DynamicPropertyRegistry registry) {
-        registry.add("mixinfer.providers[0].base-url",
-                () -> mockUpstream.url("/v1").toString().replaceAll("/$", ""));
+        if (mockUpstream != null) {
+            mockUpstream.shutdown();
+        }
     }
 
     @Test
@@ -94,9 +101,6 @@ class ChatCompletionIntegrationTest {
                 .contains("\"content\":\"hello from mock\"")
                 .contains("\"total_tokens\":8");
 
-        // 验证 MixInfer 真的往上游发了一次请求
-        assertThat(mockUpstream.takeRequest().getPath()).contains("/chat/completions");
-
         RecordedRequest recorded = mockUpstream.takeRequest();
         assertThat(recorded.getPath()).contains("/chat/completions");
     }
@@ -109,7 +113,6 @@ class ChatCompletionIntegrationTest {
 
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
-        // no Authorization header
 
         ResponseEntity<String> response = restTemplate.postForEntity(
                 "http://localhost:" + port + "/v1/chat/completions",
