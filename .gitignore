@@ -47,3 +47,4 @@ logs/
 .env.*
 application-local.yml
 application-local.properties
+body.json

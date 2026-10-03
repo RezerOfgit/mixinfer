@@ -1,0 +1,19 @@
+services:
+  mixinfer-gateway:
+    build:
+      context: ./mixinfer-gateway
+      dockerfile: Dockerfile
+    image: mixinfer/gateway:0.1.0
+    container_name: mixinfer-gateway
+    ports:
+      - "8080:8080"
+    environment:
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+    restart: unless-stopped
+
+#    healthcheck 依赖 Spring Boot Actuator，还没有这个依赖。V0.1 先删掉 healthcheck 段，等 V0.2 加 Actuator 时再补回来
+#    healthcheck:
+#      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/actuator/health"]
+#      interval: 30s
+#      timeout: 5s
+#      retries: 3
