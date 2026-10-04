@@ -19,7 +19,47 @@ Working on: V0.2 Streaming Foundation.
 - [ ] Long-term 多语言 SDK
 
 ## Architecture
-（链路图，先放你那张 Client → MixInfer → Provider 的图）
+             ┌─────────────────────┐
+             │     Client Layer    │
+             ├─────────────────────┤
+             │ OpenAI SDK          │
+             │ Anthropic SDK       │
+             │ Company SDK         │
+             │ HTTP Client         │
+             └──────────┬──────────┘
+                        ↓
+             ┌─────────────────────┐
+             │ Protocol Adapter    │
+             ├─────────────────────┤
+             │ OpenAI Adapter      │
+             │ Anthropic Adapter   │
+             │ Custom Adapter      │
+             └──────────┬──────────┘
+                        ↓
+             ┌─────────────────────┐
+             │  MixInfer Core      │
+             │                     │
+             │ LlmRequest          │
+             │ LlmResponse         │
+             │ Usage               │
+             │ Model               │
+             │ Provider            │
+             │ Endpoint            │
+             │ Router              │
+             └──────────┬──────────┘
+                        ↓
+             ┌─────────────────────┐
+             │ Provider Adapter    │
+             ├─────────────────────┤
+             │ OpenAI              │
+             │ DeepSeek            │
+             │ Qwen                │
+             │ Anthropic            │
+             │ OpenAI-Compatible   │
+             │ Custom              │
+             └──────────┬──────────┘
+                        ↓
+                 Actual LLM API
 
 ## Quick Start
 
