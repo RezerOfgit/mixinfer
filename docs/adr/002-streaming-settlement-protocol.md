@@ -116,7 +116,7 @@ DeepSeek、通义、vLLM 支持情况不一。
 **理由**：
 
 - **零新依赖**：JDK 17 内置，不引入 WebFlux 或 Apache HttpClient
-- **支持流式**：`HttpResponse.BodyHandlers.ofLines()` 直接返回 `Stream<String>`
+- **支持流式**：使用 `HttpResponse.BodyHandlers.ofInputStream()` 拿原始字节流，自行按 SSE 帧边界（`\n\n`）解析。
 - **不需要响应式栈**：V0.1 是阻塞式 MVC，引入 WebFlux 会造成两套栈并存
 - **面试可讲**：原生 API 的使用体现基本功，比调框架更有说服力
 
@@ -132,7 +132,21 @@ DeepSeek、通义、vLLM 支持情况不一。
 
 ```java
 public interface StreamingLlmProvider {
-    Stream<LlmStreamChunk> invokeStream(LlmRequest request, Endpoint endpoint);
+
+  LlmStream invokeStream(
+          LlmRequest request,
+          Endpoint endpoint
+  );
+}
+
+public interface LlmStream extends AutoCloseable {
+
+  /** Returns the next chunk, or null if the stream is exhausted. */
+  LlmStreamChunk next() throws IOException;
+
+  /** Cancels the stream and releases upstream resources. Idempotent. */
+  @Override
+  void close();
 }
 ```
 

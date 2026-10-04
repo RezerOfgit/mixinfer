@@ -121,7 +121,7 @@ V0.1 的 Router 只做一件事：
 
 > 逻辑模型名 → Endpoint
 
-内部就是一个 `Map<String, List<Endpoint>>` 的查询。不做负载均衡，不做 Fallback。
+内部就是一个 `Map<String, Endpoint>` 的查询。不做负载均衡，不做 Fallback。
 
 ## 6. Configuration Example
 
@@ -155,27 +155,3 @@ mixinfer:
 - 多语言 SDK
 
 这些会在后续版本逐步引入。见 [roadmap](../README.md#roadmap)。
-
-② Access Layer
-└── OpenAI-Compatible API  ✅
-└── API Key                ✅
-└── JWT / Tenant / Project ❌
-
-③ LLM Gateway Core
-└── Protocol Adapter       ✅（仅 OpenAI 入站）
-└── Canonical IR           ✅
-└── Model Alias            ❌（V0.2）
-└── Router                 ✅（仅 Map lookup，无 LB / Failover）
-└── Provider / Endpoint    ✅（仅单 Endpoint）
-
-④ Provider Layer
-└── OpenAICompatibleProvider  ✅
-└── Anthropic / Gemini        ❌
-└── Streaming / Retry / Health❌
-
-⑤ Governance Layer
-└── Usage Metering         ⚠️ 部分（仅从响应里读 usage）
-└── Cost / Billing / Quota ❌
-
-⑥ Control Plane              ❌
-⑦ SDK / Embedded             ❌

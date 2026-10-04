@@ -34,6 +34,7 @@ MixInfer 需要支持多个 LLM Provider（OpenAI、Anthropic、Gemini 等）。
 
 - 定义 `LlmRequest` / `LlmResponse` 作为**内部统一模型**
 - IR 描述**语义**（messages、tools、reasoning），不绑定任何 Provider 格式
+- IR 的设计目标覆盖 tools/reasoning，V0.1 只实现最小公共子集
 - 客户端格式 → IR → Provider 格式，单向转换链
 - Provider 特有能力通过 `extensions` 字段透传，不污染 IR
 
