@@ -265,6 +265,7 @@ public enum UsageSource {
 UsageRecord
  ├── providerReported     // 上游返回的 LlmUsage（可能为 null）
  ├── estimated            // 自行累计/估算的 usage（可选）
+ ├── usageSource          // UsageSource：PROVIDER / ESTIMATED / NONE
  ├── settlementStatus     // UsageSettlementStatus
  └── reason               // 中断原因（正常结束为 null）
 ```
