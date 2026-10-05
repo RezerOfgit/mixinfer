@@ -141,4 +141,45 @@ class ChatCompletionIntegrationTest {
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
         assertThat(response.getBody()).contains("model_not_found");
     }
+
+    @Test
+    void should_stream_response_as_sse() {
+        mockUpstream.enqueue(new MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "text/event-stream")
+                .setBody("""
+                    data: {"id":"c1","model":"gpt-4o-mini","choices":[{"index":0,"delta":{"role":"assistant"}}]}
+
+                    data: {"id":"c1","model":"gpt-4o-mini","choices":[{"index":0,"delta":{"content":"Hello"}}]}
+
+                    data: {"id":"c1","model":"gpt-4o-mini","choices":[{"index":0,"delta":{"content":" world"}}]}
+
+                    data: {"id":"c1","model":"gpt-4o-mini","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+                    data: [DONE]
+
+                    """));
+
+        String body = """
+            {"model":"gpt-4o-mini","stream":true,"messages":[{"role":"user","content":"hi"}]}
+            """;
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.setBearerAuth("sk-mixinfer-dev");
+
+        ResponseEntity<String> response = restTemplate.postForEntity(
+                "http://localhost:" + port + "/v1/chat/completions",
+                new HttpEntity<>(body, headers),
+                String.class);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getHeaders().getContentType().toString())
+                .contains("text/event-stream");
+        assertThat(response.getBody())
+                .contains("\"content\":\"Hello\"")
+                .contains("\"content\":\" world\"")
+                .contains("\"finish_reason\":\"stop\"")
+                .contains("[DONE]");
+    }
 }
