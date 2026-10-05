@@ -6,7 +6,6 @@ import com.mixinfer.converter.OpenAIToLlmConverter;
 import com.mixinfer.domain.LlmRequest;
 import com.mixinfer.domain.LlmResponse;
 import com.mixinfer.domain.LlmStreamChunk;
-import com.mixinfer.exception.MixInferException;
 import com.mixinfer.openai.OpenAIChatRequest;
 import com.mixinfer.openai.OpenAIChatResponse;
 import com.mixinfer.provider.LlmProvider;
@@ -81,12 +80,8 @@ public class ChatCompletionService {
             throws IOException {
         LlmRequest llmRequest = inboundConverter.toLlmRequest(request);
         Endpoint endpoint = router.route(llmRequest.getModel());
-        LlmProvider provider = providerRegistry.get(endpoint.getProvider());
 
-        if (!(provider instanceof StreamingLlmProvider streamingProvider)) {
-            throw new MixInferException(
-                    "Provider '" + endpoint.getProvider() + "' does not support streaming");
-        }
+        StreamingLlmProvider streamingProvider = providerRegistry.getStreaming(endpoint.getProvider());
 
         log.info("Streaming model={} via provider={}", llmRequest.getModel(), endpoint.getProvider());
 

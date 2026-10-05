@@ -7,9 +7,16 @@ import com.mixinfer.router.Endpoint;
  * SPI for providers that support streaming responses.
  *
  * <p>Kept separate from {@link LlmProvider} so that providers that cannot
- * stream are not forced to implement it.
+ * stream are not forced to implement it. The {@code name()} must match
+ * the corresponding {@link LlmProvider#name()} for the same endpoint.
  */
 public interface StreamingLlmProvider {
+
+    /**
+     * Unique name of this provider, matching the {@code provider} field
+     * in route configuration and the non-streaming {@link LlmProvider}.
+     */
+    String name();
 
     /**
      * Opens a streaming request to the upstream provider.

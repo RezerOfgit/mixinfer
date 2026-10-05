@@ -88,4 +88,9 @@ public class OpenAICompatibleStreamingProvider implements StreamingLlmProvider {
             throw new ProviderException("Failed to serialize request body", e);
         }
     }
+
+    @Override
+    public String name() {
+        return "openai-compatible";
+    }
 }

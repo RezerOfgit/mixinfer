@@ -48,3 +48,5 @@ logs/
 application-local.yml
 application-local.properties
 body.json
+stream-body.json
+*.local.json
