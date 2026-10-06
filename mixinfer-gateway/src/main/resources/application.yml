@@ -20,7 +20,3 @@ mixinfer:
       provider: openai-compatible
   usage:
     file: logs/usage.log
-
-logging:
-  level:
-    com.mixinfer: DEBUG

@@ -13,18 +13,16 @@ import com.mixinfer.provider.ProviderRegistry;
 import com.mixinfer.provider.StreamingLlmProvider;
 import com.mixinfer.router.Endpoint;
 import com.mixinfer.router.ModelRouter;
-import com.mixinfer.domain.UsageRecord;
-import com.mixinfer.domain.UsageSettlementStatus;
-import com.mixinfer.domain.UsageSource;
 import com.mixinfer.streaming.StreamingResponseWriter;
+import com.mixinfer.web.RequestIdFilter;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
 import java.time.Instant;
-import java.util.UUID;
 
 /**
  * Orchestrates the request pipeline:
@@ -60,20 +58,21 @@ public class ChatCompletionService {
     }
 
     public OpenAIChatResponse handle(OpenAIChatRequest request) {
+        String requestId = MDC.get(RequestIdFilter.MDC_KEY);
+        Instant startedAt = Instant.now();
         LlmRequest llmRequest = inboundConverter.toLlmRequest(request);
         Endpoint endpoint = router.route(llmRequest.getModel());
         LlmProvider provider = providerRegistry.get(endpoint.getProvider());
-        Instant startedAt = Instant.now();
 
         log.info("Routing model={} to provider={}", llmRequest.getModel(), endpoint.getProvider());
 
         LlmResponse llmResponse = provider.invoke(llmRequest, endpoint);
 
         usageRecorder.record(UsageRecord.builder()
-                .requestId(UUID.randomUUID().toString())
+                .requestId(requestId)
                 .model(llmResponse.getModel())
                 .provider(endpoint.getProvider())
-                .startedAt(startedAt)   // 需要在方法开头加 Instant startedAt = Instant.now();
+                .startedAt(startedAt)
                 .completedAt(Instant.now())
                 .providerReported(llmResponse.getUsage())
                 .settlementStatus(UsageSettlementStatus.FINAL)
@@ -98,15 +97,14 @@ public class ChatCompletionService {
     public void handleStream(OpenAIChatRequest request, HttpServletResponse response)
             throws IOException {
         Instant startedAt = Instant.now();
-        String requestId = UUID.randomUUID().toString();
+        String requestId = MDC.get(RequestIdFilter.MDC_KEY);
         String model = request.getModel();
 
         LlmRequest llmRequest = inboundConverter.toLlmRequest(request);
         Endpoint endpoint = router.route(llmRequest.getModel());
         StreamingLlmProvider provider = providerRegistry.getStreaming(endpoint.getProvider());
 
-        log.info("Streaming requestId={} model={} provider={}",
-                requestId, model, endpoint.getProvider());
+        log.info("Streaming model={} provider={}", model, endpoint.getProvider());
 
         LlmStream stream = null;
         boolean responseCommitted = false;
@@ -127,8 +125,7 @@ public class ChatCompletionService {
                 try {
                     streamingWriter.writeData(response, streamConverter.toSseData(chunk));
                 } catch (IOException e) {
-                    log.info("Client disconnected while streaming requestId={}, cancelling upstream",
-                            requestId);
+                    log.info("Client disconnected while streaming, cancelling upstream");
                     settlement = UsageSettlementStatus.UNKNOWN;
                     reason = "client_disconnected";
                     throw e;
@@ -139,18 +136,19 @@ public class ChatCompletionService {
             settlement = lastUsage != null
                     ? UsageSettlementStatus.FINAL
                     : UsageSettlementStatus.UNKNOWN;
-            log.info("Stream completed requestId={} model={} tokens={}",
-                    requestId, model,
+            log.info("Stream completed model={} tokens={}",
+                    model,
                     lastUsage == null ? "n/a" : lastUsage.getTotalTokens());
 
         } catch (IOException e) {
             if (responseCommitted) {
-                log.warn("Upstream stream failed mid-flight requestId={}: {}",
-                        requestId, e.getMessage());
-                settlement = lastUsage != null
-                        ? UsageSettlementStatus.PARTIAL
-                        : UsageSettlementStatus.UNKNOWN;
-                reason = "upstream_stream_error";
+                log.warn("Upstream stream failed mid-flight: {}", e.getMessage());
+                if (reason == null) {
+                    settlement = lastUsage != null
+                            ? UsageSettlementStatus.PARTIAL
+                            : UsageSettlementStatus.UNKNOWN;
+                    reason = "upstream_stream_error";
+                }
                 tryWriteErrorEvent(response, e);
             } else {
                 settlement = UsageSettlementStatus.UNKNOWN;
@@ -175,7 +173,7 @@ public class ChatCompletionService {
                         .reason(reason)
                         .build());
             } catch (RuntimeException e) {
-                log.warn("Usage settlement failed requestId={}: {}", requestId, e.getMessage());
+                log.warn("Usage settlement failed: {}", e.getMessage());
             }
         }
     }

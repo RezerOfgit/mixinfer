@@ -182,4 +182,35 @@ class ChatCompletionIntegrationTest {
                 .contains("\"finish_reason\":\"stop\"")
                 .contains("[DONE]");
     }
+
+    @Test
+    void should_return_request_id_header() {
+        mockUpstream.enqueue(new MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/json")
+                .setBody("""
+                    {"id":"chatcmpl-test","object":"chat.completion","created":1700000000,
+                     "model":"gpt-4o-mini","choices":[{"index":0,
+                     "message":{"role":"assistant","content":"hi"},
+                     "finish_reason":"stop"}]}
+                    """));
+
+        String body = """
+            {"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}
+            """;
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.setBearerAuth("sk-mixinfer-dev");
+
+        ResponseEntity<String> response = restTemplate.postForEntity(
+                "http://localhost:" + port + "/v1/chat/completions",
+                new HttpEntity<>(body, headers),
+                String.class);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getHeaders().getFirst("X-MixInfer-Request-Id"))
+                .isNotNull()
+                .matches("[0-9a-f\\-]{36}");
+    }
 }
