@@ -2,12 +2,13 @@ package com.mixinfer.streaming;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.servlet.ServletOutputStream;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
-import java.io.PrintWriter;
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
 /**
@@ -45,17 +46,16 @@ public class StreamingResponseWriter {
     }
 
     public void writeData(HttpServletResponse response, String data) throws IOException {
-        PrintWriter writer = response.getWriter();
-        writer.write(SSE_DATA_PREFIX);
-        writer.write(data);
-        writer.write(SSE_EVENT_SEPARATOR);
-        writer.flush();
+        ServletOutputStream out = response.getOutputStream();
+        out.write((SSE_DATA_PREFIX + data + SSE_EVENT_SEPARATOR)
+                .getBytes(StandardCharsets.UTF_8));
+        out.flush();
     }
 
     public void writeDone(HttpServletResponse response) throws IOException {
-        PrintWriter writer = response.getWriter();
-        writer.write(SSE_DONE);
-        writer.flush();
+        ServletOutputStream out = response.getOutputStream();
+        out.write(SSE_DONE.getBytes(StandardCharsets.UTF_8));
+        out.flush();
     }
 
     /**

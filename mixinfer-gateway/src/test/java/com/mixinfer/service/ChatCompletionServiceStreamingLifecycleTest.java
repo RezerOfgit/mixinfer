@@ -21,8 +21,6 @@ import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
 import java.io.IOException;
-import java.io.PrintWriter;
-import java.io.StringWriter;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -39,7 +37,6 @@ class ChatCompletionServiceStreamingLifecycleTest {
 
     @Test
     void should_close_upstream_stream_when_client_disconnects() throws IOException {
-        // A stream that yields one chunk, then would block forever.
         AtomicBoolean closed = new AtomicBoolean(false);
 
         LlmStream fakeStream = new LlmStream() {
@@ -47,21 +44,11 @@ class ChatCompletionServiceStreamingLifecycleTest {
 
             @Override
             public LlmStreamChunk next() {
-                if (yielded++ == 0) {
-                    return LlmStreamChunk.builder()
-                            .id("c1")
-                            .model("gpt-4o-mini")
-                            .delta(com.mixinfer.domain.LlmMessageDelta.builder()
-                                    .content(List.of(new ContentPart.TextPart("hi")))
-                                    .build())
-                            .build();
-                }
-                // Second call returns another chunk so the loop tries to write.
                 return LlmStreamChunk.builder()
                         .id("c1")
                         .model("gpt-4o-mini")
                         .delta(com.mixinfer.domain.LlmMessageDelta.builder()
-                                .content(List.of(new ContentPart.TextPart("more")))
+                                .content(List.of(new ContentPart.TextPart("chunk-" + (yielded++))))
                                 .build())
                         .build();
             }
@@ -86,13 +73,13 @@ class ChatCompletionServiceStreamingLifecycleTest {
 
         ChatCompletionService service = buildServiceWithProvider(fakeProvider);
 
+        // Mock ServletOutputStream so flush() throws (client disconnected).
         HttpServletResponse response = Mockito.mock(HttpServletResponse.class);
-        PrintWriter writer = Mockito.mock(PrintWriter.class);
-        when(response.getWriter()).thenReturn(writer);
-        // First chunk succeeds, second chunk fails (client disconnected).
+        jakarta.servlet.ServletOutputStream out =
+                Mockito.mock(jakarta.servlet.ServletOutputStream.class);
+        when(response.getOutputStream()).thenReturn(out);
         doThrow(new IOException("client disconnected"))
-                .doNothing()
-                .when(writer).flush();
+                .when(out).flush();
 
         OpenAIChatRequest request = new OpenAIChatRequest();
         request.setModel("gpt-4o-mini");
@@ -146,7 +133,6 @@ class ChatCompletionServiceStreamingLifecycleTest {
 
     @Test
     void should_write_error_event_when_upstream_fails_mid_stream() throws IOException {
-        // 一个吐一次就崩的假流
         LlmStream brokenStream = new LlmStream() {
             private int calls = 0;
 
@@ -182,23 +168,38 @@ class ChatCompletionServiceStreamingLifecycleTest {
 
         ChatCompletionService service = buildServiceWithProvider(fakeProvider);
 
-        // 用 StringWriter 捕获所有写到客户端的内容
-        StringWriter captured = new StringWriter();
-        PrintWriter writer = new PrintWriter(captured);
+        // Capture all bytes written to the response via a real ServletOutputStream.
+        java.io.ByteArrayOutputStream buf = new java.io.ByteArrayOutputStream();
+        jakarta.servlet.ServletOutputStream out = new jakarta.servlet.ServletOutputStream() {
+            @Override
+            public boolean isReady() {
+                return true;
+            }
+
+            @Override
+            public void setWriteListener(jakarta.servlet.WriteListener writeListener) {
+                // No-op.
+            }
+
+            @Override
+            public void write(int b) {
+                buf.write(b);
+            }
+        };
+
         HttpServletResponse response = Mockito.mock(HttpServletResponse.class);
-        when(response.getWriter()).thenReturn(writer);
+        when(response.getOutputStream()).thenReturn(out);
 
         OpenAIChatRequest request = new OpenAIChatRequest();
         request.setModel("gpt-4o-mini");
         request.setStream(true);
         request.setMessages(List.of(new OpenAIMessage("user", "hi")));
 
-        // 异常应该往上抛
         assertThatThrownBy(() -> service.handleStream(request, response))
                 .isInstanceOf(IOException.class)
                 .hasMessageContaining("upstream closed");
 
-        // 关键断言：客户端收到了 error 事件
-        assertThat(captured.toString()).contains("upstream_stream_error");
+        assertThat(buf.toString(java.nio.charset.StandardCharsets.UTF_8))
+                .contains("upstream_stream_error");
     }
 }
