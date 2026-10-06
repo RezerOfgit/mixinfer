@@ -8,6 +8,8 @@ import com.mixinfer.exception.ProviderException;
 import com.mixinfer.openai.OpenAIChatRequest;
 import com.mixinfer.router.Endpoint;
 import com.mixinfer.streaming.SseEventParser;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -27,6 +29,7 @@ public class OpenAICompatibleStreamingProvider implements StreamingLlmProvider {
 
     private static final String CHAT_COMPLETIONS_PATH = "/chat/completions";
     private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(10);
+    private static final Logger log = LoggerFactory.getLogger(OpenAICompatibleStreamingProvider.class);
 
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
@@ -50,6 +53,7 @@ public class OpenAICompatibleStreamingProvider implements StreamingLlmProvider {
         upstreamRequest.setStream(true);
 
         HttpRequest httpRequest = buildHttpRequest(upstreamRequest, endpoint);
+        log.debug("Opening upstream stream to {}", endpoint.getBaseUrl());
 
         try {
             HttpResponse<java.io.InputStream> response = httpClient.send(

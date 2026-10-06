@@ -50,3 +50,4 @@ application-local.properties
 body.json
 stream-body.json
 *.local.json
+stream-body*.json

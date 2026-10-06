@@ -80,21 +80,55 @@ public class ChatCompletionService {
             throws IOException {
         LlmRequest llmRequest = inboundConverter.toLlmRequest(request);
         Endpoint endpoint = router.route(llmRequest.getModel());
-
-        StreamingLlmProvider streamingProvider = providerRegistry.getStreaming(endpoint.getProvider());
+        StreamingLlmProvider provider = providerRegistry.getStreaming(endpoint.getProvider());
 
         log.info("Streaming model={} via provider={}", llmRequest.getModel(), endpoint.getProvider());
 
-        try (LlmStream stream = streamingProvider.invokeStream(llmRequest, endpoint)) {
+        LlmStream stream = null;
+        boolean responseCommitted = false;
+        try {
+            stream = provider.invokeStream(llmRequest, endpoint);
             streamingWriter.prepare(response);
+            responseCommitted = true;
 
             LlmStreamChunk chunk;
             while ((chunk = stream.next()) != null) {
-                streamingWriter.writeData(response, streamConverter.toSseData(chunk));
+                try {
+                    streamingWriter.writeData(response, streamConverter.toSseData(chunk));
+                } catch (IOException e) {
+                    // Downstream (client) disconnected: stop reading upstream
+                    // and release the upstream connection.
+                    log.info("Client disconnected while streaming model={}, cancelling upstream",
+                            llmRequest.getModel());
+                    throw e;
+                }
             }
             streamingWriter.writeDone(response);
-
             log.info("Stream completed for model={}", llmRequest.getModel());
+
+        } catch (IOException e) {
+            if (responseCommitted) {
+                // Upstream failed after SSE headers were sent.
+                // Tell the client the stream is broken, then close.
+                log.warn("Upstream stream failed mid-flight for model={}: {}",
+                        llmRequest.getModel(), e.getMessage());
+                tryWriteErrorEvent(response, e);
+            }
+            throw e;
+
+        } finally {
+            if (stream != null) {
+                stream.close();
+            }
+        }
+    }
+
+    private void tryWriteErrorEvent(HttpServletResponse response, IOException cause) {
+        try {
+            streamingWriter.writeError(response, "upstream_stream_error", cause.getMessage());
+        } catch (IOException writeFailure) {
+            // Client is already gone; nothing more to do.
+            log.debug("Failed to write error event to client: {}", writeFailure.getMessage());
         }
     }
 }
