@@ -18,6 +18,8 @@ mixinfer:
   routes:
     - model:  deepseek-flash
       provider: openai-compatible
+  usage:
+    file: logs/usage.log
 
 logging:
   level:

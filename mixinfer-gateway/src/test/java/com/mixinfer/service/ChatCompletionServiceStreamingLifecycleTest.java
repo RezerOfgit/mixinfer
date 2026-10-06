@@ -7,6 +7,8 @@ import com.mixinfer.converter.OpenAIToLlmConverter;
 import com.mixinfer.domain.ContentPart;
 import com.mixinfer.domain.LlmRequest;
 import com.mixinfer.domain.LlmStreamChunk;
+import com.mixinfer.domain.UsageRecord;
+import com.mixinfer.metering.UsageRecorder;
 import com.mixinfer.openai.OpenAIChatRequest;
 import com.mixinfer.openai.OpenAIMessage;
 import com.mixinfer.provider.LlmStream;
@@ -133,7 +135,13 @@ class ChatCompletionServiceStreamingLifecycleTest {
                 new LlmToOpenAIStreamConverter(objectMapper),
                 router,
                 registry,
-                new com.mixinfer.streaming.StreamingResponseWriter(objectMapper));
+                new com.mixinfer.streaming.StreamingResponseWriter(objectMapper),
+                new UsageRecorder() {
+                    @Override
+                    public void record(UsageRecord record) {
+                        // 测试不需要真正记录
+                    }
+                });
     }
 
     @Test
