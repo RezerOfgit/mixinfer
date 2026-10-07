@@ -5,61 +5,54 @@
 可嵌入、可扩展的大模型统一接入与治理基础设施。
 
 ## Status
-✅ V0.1 released — OpenAI-compatible gateway with semantic IR.
-Working on: V0.2 Streaming Foundation.
+
+✅ **V0.2 released** — streaming data plane with usage settlement.
+
+- V0.1: OpenAI-compatible gateway with semantic IR
+- V0.2: SSE streaming, upstream cancellation, usage settlement, request correlation
+
+Working on: V0.3 Routing & Reliability.
 
 ## Why MixInfer
-（3–5 行差异化叙事，指向语义级 IR）
+
+Most LLM gateways use OpenAI's request format as their internal format.
+This works until you need to support a provider whose semantics do not fit —
+then the format leaks into every layer.
+
+MixInfer keeps a **provider-neutral internal representation (IR)** between
+protocols. Inbound format, upstream format, and outbound format are
+independent choices. Adding a new protocol does not require touching the IR;
+adding a new provider does not require touching the routing layer.
 
 ## Roadmap
-- [x] V0.1 单 Provider 转发
-- [ ] V0.2 Streaming Foundation
-- [ ] V0.3 路由 / Fallback / 管理界面
-- [ ] V0.4 计量 / 预算
-- [ ] Long-term 多语言 SDK
+
+- [x] **V0.1** OpenAI-Compatible Gateway with Semantic IR
+- [x] **V0.2** Streaming Foundation
+    - [x] SSE streaming end to end
+    - [x] Upstream cancellation on client disconnect
+    - [x] Usage settlement state machine
+    - [x] requestId propagation
+- [ ] **V0.3** Routing & Reliability — multi-endpoint, weighted routing, fallback, retry
+- [ ] **V0.4** Usage & Governance — cost, quota, rate limit
+- [ ] **V0.5** Control Plane — Web console, provider / endpoint / key management
+- [ ] **Long-term** SDKs, embedded mode, multi-protocol inbound
 
 ## Architecture
-             ┌─────────────────────┐
-             │     Client Layer    │
-             ├─────────────────────┤
-             │ OpenAI SDK          │
-             │ Anthropic SDK       │
-             │ Company SDK         │
-             │ HTTP Client         │
-             └──────────┬──────────┘
-                        ↓
-             ┌─────────────────────┐
-             │ Protocol Adapter    │
-             ├─────────────────────┤
-             │ OpenAI Adapter      │
-             │ Anthropic Adapter   │
-             │ Custom Adapter      │
-             └──────────┬──────────┘
-                        ↓
-             ┌─────────────────────┐
-             │  MixInfer Core      │
-             │                     │
-             │ LlmRequest          │
-             │ LlmResponse         │
-             │ Usage               │
-             │ Model               │
-             │ Provider            │
-             │ Endpoint            │
-             │ Router              │
-             └──────────┬──────────┘
-                        ↓
-             ┌─────────────────────┐
-             │ Provider Adapter    │
-             ├─────────────────────┤
-             │ OpenAI              │
-             │ DeepSeek            │
-             │ Qwen                │
-             │ Anthropic            │
-             │ OpenAI-Compatible   │
-             │ Custom              │
-             └──────────┬──────────┘
-                        ↓
-                 Actual LLM API
+
+```
+Client
+  │
+  │ OpenAI-compatible HTTP (streaming or not)
+  ▼
+MixInfer Gateway
+  │
+  │  authenticate → convert to IR → route → invoke upstream
+  │
+  ▼
+Upstream LLM (any OpenAI-compatible endpoint)
+```
+
+See [docs/architecture.md](docs/architecture.md) for the full design.
 
 ## Quick Start
 
@@ -72,13 +65,23 @@ export DEEPSEEK_API_KEY=sk-your-key-here
 # 2. Start the gateway
 docker compose up --build
 
-# 3. In another terminal, send a request
+# 3. Send a non-streaming request
 curl -X POST http://localhost:8080/v1/chat/completions \
   -H "Authorization: Bearer sk-mixinfer-dev" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "deepseek-flash",
     "messages": [{"role": "user", "content": "Say hi"}]
+  }'
+
+# 4. Send a streaming request
+curl -N -X POST http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer sk-mixinfer-dev" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "deepseek-flash",
+    "stream": true,
+    "messages": [{"role": "user", "content": "Count from 1 to 10"}]
   }'
 ```
 
@@ -113,10 +116,18 @@ mixinfer:
   routes:
     - model: deepseek-flash
       provider: openai-compatible
+  usage:
+    file: ${MIXINFER_USAGE_FILE:logs/usage.log}
 ```
 
 **The same client code works with any OpenAI-compatible upstream** — just change `base-url`.
 No code change is required to switch between OpenAI, DeepSeek, OpenRouter, a self-hosted vLLM, or a company-internal gateway.
 
+## Design Decisions
+
+- [ADR-001](docs/adr/001-use-semantic-ir.md): Semantic IR instead of protocol-level conversion
+- [ADR-002](docs/adr/002-streaming-data-plane.md): Streaming data plane and usage settlement
+
 ## License
+
 MIT
