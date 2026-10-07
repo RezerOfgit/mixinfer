@@ -19,4 +19,4 @@ mixinfer:
     - model:  deepseek-flash
       provider: openai-compatible
   usage:
-    file: logs/usage.log
+    file: ${MIXINFER_USAGE_FILE:logs/usage.log}

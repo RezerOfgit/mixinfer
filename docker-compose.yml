@@ -9,6 +9,9 @@ services:
       - "8080:8080"
     environment:
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - MIXINFER_USAGE_FILE=/app/logs/usage.log
+    volumes:
+      - ./logs:/app/logs
     restart: unless-stopped
 
 #    healthcheck 依赖 Spring Boot Actuator，还没有这个依赖。V0.1 先删掉 healthcheck 段，等 V0.2 加 Actuator 时再补回来
