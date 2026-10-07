@@ -61,7 +61,7 @@ public class ChatCompletionService {
         String requestId = MDC.get(RequestIdFilter.MDC_KEY);
         Instant startedAt = Instant.now();
         LlmRequest llmRequest = inboundConverter.toLlmRequest(request);
-        Endpoint endpoint = router.route(llmRequest.getModel());
+        Endpoint endpoint = router.route(llmRequest.getModel()).get(0).getEndpoint();
         LlmProvider provider = providerRegistry.get(endpoint.getProvider());
 
         log.info("Routing model={} to provider={}", llmRequest.getModel(), endpoint.getProvider());
@@ -101,7 +101,7 @@ public class ChatCompletionService {
         String model = request.getModel();
 
         LlmRequest llmRequest = inboundConverter.toLlmRequest(request);
-        Endpoint endpoint = router.route(llmRequest.getModel());
+        Endpoint endpoint = router.route(llmRequest.getModel()).get(0).getEndpoint();
         StreamingLlmProvider provider = providerRegistry.getStreaming(endpoint.getProvider());
 
         log.info("Streaming model={} provider={}", model, endpoint.getProvider());

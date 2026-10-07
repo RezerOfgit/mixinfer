@@ -16,7 +16,13 @@ mixinfer:
       models:
         - deepseek-flash
   routes:
-    - model:  deepseek-flash
-      provider: openai-compatible
+    # New multi-target form (V0.3+). Declaration order = priority.
+    - model: deepseek-flash
+      targets:
+        - provider: openai-compatible
+
+    # Backward-compatible single-provider form (V0.1-V0.2):
+    # - model: deepseek-flash
+    #   provider: openai-compatible
   usage:
     file: ${MIXINFER_USAGE_FILE:logs/usage.log}

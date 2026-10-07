@@ -45,11 +45,51 @@ public class MixInferProperties {
     }
 
     /**
-     * Mapping from a logical model name to a provider.
+     * Mapping from a logical model name to one or more upstream targets.
      */
     @Data
     public static class RouteConfig {
+
         private String model;
+
+        /**
+         * V0.3+ multi-target form. Declaration order serves as implicit
+         * priority: targets are tried in the order listed. When present,
+         * {@link #provider} is ignored.
+         */
+        private List<TargetConfig> targets = new ArrayList<>();
+
+        /**
+         * V0.1-V0.2 single-provider form. Kept for backward compatibility.
+         * New configurations should use {@link #targets}.
+         */
+        private String provider;
+
+        /**
+         * Returns the effective target list, resolving the legacy
+         * single-provider form into a one-element list.
+         */
+        public List<TargetConfig> resolveTargets() {
+            if (!targets.isEmpty()) {
+                return targets;
+            }
+            if (provider != null && !provider.isBlank()) {
+                TargetConfig single = new TargetConfig();
+                single.setProvider(provider);
+                return List.of(single);
+            }
+            return List.of();
+        }
+    }
+
+    /**
+     * A single upstream target within a route.
+     *
+     * <p>V0.3.0 carries only the provider name. Future versions may add
+     * weight, priority, or tags without changing the surrounding config shape.
+     */
+    @Data
+    public static class TargetConfig {
         private String provider;
     }
 }
