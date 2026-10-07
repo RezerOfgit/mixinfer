@@ -24,6 +24,9 @@ public class MixInferProperties {
     /** Mapping from logical model name to a provider. */
     private List<RouteConfig> routes = new ArrayList<>();
 
+    /** Health tracking configuration for multi-endpoint routing. */
+    private HealthConfig health = new HealthConfig();
+
     /**
      * A single client-facing API key.
      */
@@ -91,5 +94,24 @@ public class MixInferProperties {
     @Data
     public static class TargetConfig {
         private String provider;
+    }
+
+    /**
+     * Configuration for endpoint health tracking.
+     *
+     * <p>Health tracking is advisory: it reduces the probability of hitting
+     * a known-bad endpoint but never makes routing decisions on its own.
+     */
+    @Data
+    public static class HealthConfig {
+
+        /** Whether health tracking is enabled. */
+        private boolean enabled = true;
+
+        /** Consecutive failures before an endpoint is marked unhealthy. */
+        private int failureThreshold = 3;
+
+        /** Seconds an unhealthy endpoint stays excluded before retry. */
+        private int cooldownSeconds = 30;
     }
 }
