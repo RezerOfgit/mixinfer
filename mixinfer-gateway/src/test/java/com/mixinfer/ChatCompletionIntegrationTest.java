@@ -359,4 +359,23 @@ class ChatCompletionIntegrationTest {
         // Note: if the file doesn't exist, this is a no-op;
         // the assertion is a best-effort sanity check.
     }
+
+//    @Test
+    void should_failover_to_second_endpoint_when_first_fails() {
+        // First upstream returns 500, second returns 200.
+        mockUpstream.enqueue(new MockResponse().setResponseCode(500));
+
+        mockUpstream.enqueue(new MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/json")
+                .setBody("""
+                    {"id":"c1","object":"chat.completion","created":1700000000,
+                     "model":"gpt-4o-mini","choices":[{"index":0,
+                     "message":{"role":"assistant","content":"from backup"},
+                     "finish_reason":"stop"}]}
+                    """));
+
+        // Override config to two targets.
+        // -- 见下面说明 --
+    }
 }

@@ -62,7 +62,8 @@ public class OpenAICompatibleStreamingProvider implements StreamingLlmProvider {
 
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
                 throw new ProviderException(
-                        "Upstream returned HTTP " + response.statusCode());
+                        "Upstream returned HTTP " + response.statusCode(),
+                        response.statusCode());
             }
 
             return new HttpLlmStream(

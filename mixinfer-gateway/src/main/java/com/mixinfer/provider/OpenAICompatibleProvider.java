@@ -11,9 +11,10 @@ import com.mixinfer.router.Endpoint;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.HttpStatusCodeException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
-
+import org.springframework.web.client.RestClientResponseException;
 
 /**
  * Generic provider for any upstream that speaks the OpenAI-compatible
@@ -59,6 +60,16 @@ public class OpenAICompatibleProvider implements LlmProvider {
             }
             return inboundConverter.toLlmResponse(upstreamResponse);
 
+        } catch (HttpStatusCodeException e) {
+            throw new ProviderException(
+                    "Upstream returned HTTP " + e.getStatusCode().value(),
+                    e.getStatusCode().value(),
+                    e);
+        } catch (RestClientResponseException e) {
+            throw new ProviderException(
+                    "Upstream returned HTTP " + e.getStatusCode().value(),
+                    e.getStatusCode().value(),
+                    e);
         } catch (RestClientException e) {
             throw new ProviderException("Upstream call failed: " + e.getMessage(), e);
         }

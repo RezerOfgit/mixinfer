@@ -4,6 +4,7 @@ import com.mixinfer.converter.LlmToOpenAIConverter;
 import com.mixinfer.converter.LlmToOpenAIStreamConverter;
 import com.mixinfer.converter.OpenAIToLlmConverter;
 import com.mixinfer.domain.*;
+import com.mixinfer.exception.ProviderException;
 import com.mixinfer.metering.UsageRecorder;
 import com.mixinfer.openai.OpenAIChatRequest;
 import com.mixinfer.openai.OpenAIChatResponse;
@@ -12,7 +13,12 @@ import com.mixinfer.provider.LlmStream;
 import com.mixinfer.provider.ProviderRegistry;
 import com.mixinfer.provider.StreamingLlmProvider;
 import com.mixinfer.router.Endpoint;
+import com.mixinfer.router.EndpointSelector;
 import com.mixinfer.router.ModelRouter;
+import com.mixinfer.router.RouteTarget;
+import com.mixinfer.router.failure.FailureClassifier;
+import com.mixinfer.router.failure.FailureType;
+import com.mixinfer.router.health.EndpointHealthTracker;
 import com.mixinfer.streaming.StreamingResponseWriter;
 import com.mixinfer.web.RequestIdFilter;
 import jakarta.servlet.http.HttpServletResponse;
@@ -23,6 +29,7 @@ import org.springframework.stereotype.Service;
 
 import java.io.IOException;
 import java.time.Instant;
+import java.util.List;
 
 /**
  * Orchestrates the request pipeline:
@@ -40,6 +47,9 @@ public class ChatCompletionService {
     private final ProviderRegistry providerRegistry;
     private final StreamingResponseWriter streamingWriter;
     private final UsageRecorder usageRecorder;
+    private final EndpointHealthTracker healthTracker;
+    private final EndpointSelector selector;
+    private final FailureClassifier failureClassifier;
 
     public ChatCompletionService(OpenAIToLlmConverter inboundConverter,
                                  LlmToOpenAIConverter outboundConverter,
@@ -47,7 +57,10 @@ public class ChatCompletionService {
                                  ModelRouter router,
                                  ProviderRegistry providerRegistry,
                                  StreamingResponseWriter streamingWriter,
-                                 UsageRecorder usageRecorder) {
+                                 UsageRecorder usageRecorder,
+                                 EndpointHealthTracker healthTracker,
+                                 EndpointSelector selector,
+                                 FailureClassifier failureClassifier) {
         this.inboundConverter = inboundConverter;
         this.outboundConverter = outboundConverter;
         this.streamConverter = streamConverter;
@@ -55,35 +68,95 @@ public class ChatCompletionService {
         this.providerRegistry = providerRegistry;
         this.streamingWriter = streamingWriter;
         this.usageRecorder = usageRecorder;
+        this.healthTracker = healthTracker;
+        this.selector = selector;
+        this.failureClassifier = failureClassifier;
     }
 
     public OpenAIChatResponse handle(OpenAIChatRequest request) {
-        String requestId = MDC.get(RequestIdFilter.MDC_KEY);
         Instant startedAt = Instant.now();
+        String requestId = MDC.get(RequestIdFilter.MDC_KEY);
+        String model = request.getModel();
+
         LlmRequest llmRequest = inboundConverter.toLlmRequest(request);
-        Endpoint endpoint = router.route(llmRequest.getModel()).get(0).getEndpoint();
-        LlmProvider provider = providerRegistry.get(endpoint.getProvider());
 
-        log.info("Routing model={} to provider={}", llmRequest.getModel(), endpoint.getProvider());
+        List<RouteTarget> candidates = router.route(llmRequest.getModel());
+        List<RouteTarget> healthy = healthTracker.filter(candidates);
+        List<RouteTarget> ordered = selector.order(healthy);
 
-        LlmResponse llmResponse = provider.invoke(llmRequest, endpoint);
+        ProviderException lastError = null;
+        String lastProvider = null;
+
+        for (int i = 0; i < ordered.size(); i++) {
+            Endpoint endpoint = ordered.get(i).getEndpoint();
+            lastProvider = endpoint.getProvider();
+            boolean isLastAttempt = (i == ordered.size() - 1);
+
+            try {
+                log.info("Routing model={} to provider={} (attempt {}/{})",
+                        model, endpoint.getProvider(), i + 1, ordered.size());
+
+                LlmProvider provider = providerRegistry.get(endpoint.getProvider());
+                LlmResponse llmResponse = provider.invoke(llmRequest, endpoint);
+
+                healthTracker.recordSuccess(endpoint);
+
+                log.info("Upstream responded model={}, tokens={}",
+                        llmResponse.getModel(),
+                        llmResponse.getUsage() == null
+                                ? "n/a" : llmResponse.getUsage().getTotalTokens());
+
+                usageRecorder.record(UsageRecord.builder()
+                        .requestId(requestId)
+                        .model(llmResponse.getModel())
+                        .provider(endpoint.getProvider())
+                        .startedAt(startedAt)
+                        .completedAt(Instant.now())
+                        .providerReported(llmResponse.getUsage())
+                        .settlementStatus(UsageSettlementStatus.FINAL)
+                        .usageSource(llmResponse.getUsage() != null
+                                ? UsageSource.PROVIDER : UsageSource.NONE)
+                        .build());
+
+                return outboundConverter.toOpenAIResponse(llmResponse);
+
+            } catch (ProviderException e) {
+                FailureType failureType = failureClassifier.classify(e);
+                healthTracker.recordFailure(endpoint);
+
+                log.warn("Provider {} failed (type={}, attempt {}/{}): {}",
+                        endpoint.getProvider(), failureType, i + 1, ordered.size(),
+                        e.getMessage());
+
+                if (!failureType.isFailoverable()) {
+                    log.info("Failure type {} is not failoverable; aborting",
+                            failureType);
+                    throw e;
+                }
+
+                lastError = e;
+                if (isLastAttempt) {
+                    break;
+                }
+            }
+        }
+
+        log.warn("All {} endpoints failed for model={}", ordered.size(), model);
 
         usageRecorder.record(UsageRecord.builder()
                 .requestId(requestId)
-                .model(llmResponse.getModel())
-                .provider(endpoint.getProvider())
+                .model(model)
+                .provider(lastProvider)
                 .startedAt(startedAt)
                 .completedAt(Instant.now())
-                .providerReported(llmResponse.getUsage())
-                .settlementStatus(UsageSettlementStatus.FINAL)
-                .usageSource(llmResponse.getUsage() != null ? UsageSource.PROVIDER : UsageSource.NONE)
+                .settlementStatus(UsageSettlementStatus.UNKNOWN)
+                .usageSource(UsageSource.NONE)
+                .reason("all_endpoints_failed")
                 .build());
 
-        log.info("Upstream responded in model={}, tokens={}",
-                llmResponse.getModel(),
-                llmResponse.getUsage() == null ? "n/a" : llmResponse.getUsage().getTotalTokens());
-
-        return outboundConverter.toOpenAIResponse(llmResponse);
+        throw new ProviderException(
+                "All " + ordered.size() + " endpoints failed for model " + model,
+                lastError);
     }
 
     /**

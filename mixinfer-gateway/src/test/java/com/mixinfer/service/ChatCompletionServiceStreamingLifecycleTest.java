@@ -16,6 +16,9 @@ import com.mixinfer.provider.ProviderRegistry;
 import com.mixinfer.provider.StreamingLlmProvider;
 import com.mixinfer.router.Endpoint;
 import com.mixinfer.router.ModelRouter;
+import com.mixinfer.router.RouteTarget;
+import com.mixinfer.router.failure.FailureType;
+import com.mixinfer.router.health.EndpointHealthTracker;
 import jakarta.servlet.http.HttpServletResponse;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -128,7 +131,14 @@ class ChatCompletionServiceStreamingLifecycleTest {
                     public void record(UsageRecord record) {
                         // 测试不需要真正记录
                     }
-                });
+                },
+                new EndpointHealthTracker() {
+                    @Override public List<RouteTarget> filter(List<RouteTarget> c) { return c; }
+                    @Override public void recordSuccess(Endpoint e) {}
+                    @Override public void recordFailure(Endpoint e) {}
+                },
+                candidates -> candidates,                          // EndpointSelector: no-op
+                error -> FailureType.UNKNOWN);                     // FailureClassifier: unknown
     }
 
     @Test
