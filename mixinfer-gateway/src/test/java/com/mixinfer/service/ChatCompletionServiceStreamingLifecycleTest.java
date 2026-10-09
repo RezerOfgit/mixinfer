@@ -7,18 +7,15 @@ import com.mixinfer.converter.OpenAIToLlmConverter;
 import com.mixinfer.domain.ContentPart;
 import com.mixinfer.domain.LlmRequest;
 import com.mixinfer.domain.LlmStreamChunk;
-import com.mixinfer.domain.UsageRecord;
-import com.mixinfer.metering.UsageRecorder;
 import com.mixinfer.openai.OpenAIChatRequest;
 import com.mixinfer.openai.OpenAIMessage;
 import com.mixinfer.provider.LlmStream;
 import com.mixinfer.provider.ProviderRegistry;
 import com.mixinfer.provider.StreamingLlmProvider;
-import com.mixinfer.router.Endpoint;
-import com.mixinfer.router.ModelRouter;
-import com.mixinfer.router.RouteTarget;
-import com.mixinfer.router.failure.FailureType;
+import com.mixinfer.router.*;
+import com.mixinfer.router.failure.DefaultFailureClassifier;
 import com.mixinfer.router.health.EndpointHealthTracker;
+import com.mixinfer.streaming.StreamingResponseWriter;
 import jakarta.servlet.http.HttpServletResponse;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -119,26 +116,25 @@ class ChatCompletionServiceStreamingLifecycleTest {
 
         ModelRouter router = new ModelRouter(properties);
 
+        EndpointHealthTracker noopHealth = new EndpointHealthTracker() {
+            @Override public List<RouteTarget> filter(List<RouteTarget> c) { return c; }
+            @Override public void recordSuccess(Endpoint e) {}
+            @Override public void recordFailure(Endpoint e) {}
+        };
+
+        EndpointSelector sequential = c -> c;
+        RoutePlanner planner = new RoutePlanner(router, noopHealth, sequential);
+
         return new ChatCompletionService(
                 new OpenAIToLlmConverter(),
                 new LlmToOpenAIConverter(),
                 new LlmToOpenAIStreamConverter(objectMapper),
-                router,
+                planner,
                 registry,
-                new com.mixinfer.streaming.StreamingResponseWriter(objectMapper),
-                new UsageRecorder() {
-                    @Override
-                    public void record(UsageRecord record) {
-                        // 测试不需要真正记录
-                    }
-                },
-                new EndpointHealthTracker() {
-                    @Override public List<RouteTarget> filter(List<RouteTarget> c) { return c; }
-                    @Override public void recordSuccess(Endpoint e) {}
-                    @Override public void recordFailure(Endpoint e) {}
-                },
-                candidates -> candidates,                          // EndpointSelector: no-op
-                error -> FailureType.UNKNOWN);                     // FailureClassifier: unknown
+                new StreamingResponseWriter(objectMapper),
+                r -> {},
+                noopHealth,
+                new DefaultFailureClassifier());
     }
 
     @Test

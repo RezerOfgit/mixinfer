@@ -13,8 +13,7 @@ import com.mixinfer.provider.LlmStream;
 import com.mixinfer.provider.ProviderRegistry;
 import com.mixinfer.provider.StreamingLlmProvider;
 import com.mixinfer.router.Endpoint;
-import com.mixinfer.router.EndpointSelector;
-import com.mixinfer.router.ModelRouter;
+import com.mixinfer.router.RoutePlanner;
 import com.mixinfer.router.RouteTarget;
 import com.mixinfer.router.failure.FailureClassifier;
 import com.mixinfer.router.failure.FailureType;
@@ -43,33 +42,30 @@ public class ChatCompletionService {
     private final OpenAIToLlmConverter inboundConverter;
     private final LlmToOpenAIConverter outboundConverter;
     private final LlmToOpenAIStreamConverter streamConverter;
-    private final ModelRouter router;
+    private final RoutePlanner routePlanner;
     private final ProviderRegistry providerRegistry;
     private final StreamingResponseWriter streamingWriter;
     private final UsageRecorder usageRecorder;
     private final EndpointHealthTracker healthTracker;
-    private final EndpointSelector selector;
     private final FailureClassifier failureClassifier;
 
     public ChatCompletionService(OpenAIToLlmConverter inboundConverter,
                                  LlmToOpenAIConverter outboundConverter,
                                  LlmToOpenAIStreamConverter streamConverter,
-                                 ModelRouter router,
+                                 RoutePlanner routePlanner,
                                  ProviderRegistry providerRegistry,
                                  StreamingResponseWriter streamingWriter,
                                  UsageRecorder usageRecorder,
                                  EndpointHealthTracker healthTracker,
-                                 EndpointSelector selector,
                                  FailureClassifier failureClassifier) {
         this.inboundConverter = inboundConverter;
         this.outboundConverter = outboundConverter;
         this.streamConverter = streamConverter;
-        this.router = router;
+        this.routePlanner = routePlanner;
         this.providerRegistry = providerRegistry;
         this.streamingWriter = streamingWriter;
         this.usageRecorder = usageRecorder;
         this.healthTracker = healthTracker;
-        this.selector = selector;
         this.failureClassifier = failureClassifier;
     }
 
@@ -80,9 +76,7 @@ public class ChatCompletionService {
 
         LlmRequest llmRequest = inboundConverter.toLlmRequest(request);
 
-        List<RouteTarget> candidates = router.route(llmRequest.getModel());
-        List<RouteTarget> healthy = healthTracker.filter(candidates);
-        List<RouteTarget> ordered = selector.order(healthy);
+        List<RouteTarget> ordered = routePlanner.plan(llmRequest.getModel());
 
         ProviderException lastError = null;
         String lastProvider = null;
@@ -174,19 +168,70 @@ public class ChatCompletionService {
         String model = request.getModel();
 
         LlmRequest llmRequest = inboundConverter.toLlmRequest(request);
-        Endpoint endpoint = router.route(llmRequest.getModel()).get(0).getEndpoint();
-        StreamingLlmProvider provider = providerRegistry.getStreaming(endpoint.getProvider());
+        List<RouteTarget> ordered = routePlanner.plan(llmRequest.getModel());
 
-        log.info("Streaming model={} provider={}", model, endpoint.getProvider());
-
+        // Phase 1: open the upstream stream, with failover only before commit.
         LlmStream stream = null;
+        Endpoint selected = null;
+        ProviderException lastError = null;
+
+        for (int i = 0; i < ordered.size(); i++) {
+            Endpoint endpoint = ordered.get(i).getEndpoint();
+            boolean isLastAttempt = (i == ordered.size() - 1);
+
+            try {
+                log.info("Streaming model={} via provider={} (attempt {}/{})",
+                        model, endpoint.getProvider(), i + 1, ordered.size());
+
+                StreamingLlmProvider provider = providerRegistry.getStreaming(endpoint.getProvider());
+                stream = provider.invokeStream(llmRequest, endpoint);
+                selected = endpoint;
+                healthTracker.recordSuccess(endpoint);
+                break;
+
+            } catch (ProviderException e) {
+                FailureType failureType = failureClassifier.classify(e);
+                healthTracker.recordFailure(endpoint);
+
+                log.warn("Streaming open failed (type={}, attempt {}/{}): {}",
+                        failureType, i + 1, ordered.size(), e.getMessage());
+
+                if (!failureType.isFailoverable()) {
+                    log.info("Failure type {} is not failoverable; aborting", failureType);
+                    throw e;
+                }
+
+                lastError = e;
+                if (isLastAttempt) {
+                    break;
+                }
+            }
+        }
+
+        if (stream == null) {
+            log.warn("All {} endpoints failed to open for model={}", ordered.size(), model);
+            usageRecorder.record(UsageRecord.builder()
+                    .requestId(requestId)
+                    .model(model)
+                    .provider(selected == null ? null : selected.getProvider())
+                    .startedAt(startedAt)
+                    .completedAt(Instant.now())
+                    .settlementStatus(UsageSettlementStatus.UNKNOWN)
+                    .usageSource(UsageSource.NONE)
+                    .reason("all_endpoints_failed")
+                    .build());
+            throw new ProviderException(
+                    "All " + ordered.size() + " endpoints failed to open for model " + model,
+                    lastError);
+        }
+
+        // Phase 2: forward. No failover after this point.
         boolean responseCommitted = false;
         LlmUsage lastUsage = null;
         UsageSettlementStatus settlement = UsageSettlementStatus.PENDING;
         String reason = null;
 
         try {
-            stream = provider.invokeStream(llmRequest, endpoint);
             streamingWriter.prepare(response);
             responseCommitted = true;
 
@@ -210,18 +255,15 @@ public class ChatCompletionService {
                     ? UsageSettlementStatus.FINAL
                     : UsageSettlementStatus.UNKNOWN;
             log.info("Stream completed model={} tokens={}",
-                    model,
-                    lastUsage == null ? "n/a" : lastUsage.getTotalTokens());
+                    model, lastUsage == null ? "n/a" : lastUsage.getTotalTokens());
 
         } catch (IOException e) {
             if (responseCommitted) {
                 log.warn("Upstream stream failed mid-flight: {}", e.getMessage());
-                if (reason == null) {
-                    settlement = lastUsage != null
-                            ? UsageSettlementStatus.PARTIAL
-                            : UsageSettlementStatus.UNKNOWN;
-                    reason = "upstream_stream_error";
-                }
+                settlement = lastUsage != null
+                        ? UsageSettlementStatus.PARTIAL
+                        : UsageSettlementStatus.UNKNOWN;
+                reason = "upstream_stream_error";
                 tryWriteErrorEvent(response, e);
             } else {
                 settlement = UsageSettlementStatus.UNKNOWN;
@@ -230,14 +272,12 @@ public class ChatCompletionService {
             throw e;
 
         } finally {
-            if (stream != null) {
-                stream.close();
-            }
+            stream.close();
             try {
                 usageRecorder.record(UsageRecord.builder()
                         .requestId(requestId)
                         .model(model)
-                        .provider(endpoint.getProvider())
+                        .provider(selected.getProvider())
                         .startedAt(startedAt)
                         .completedAt(Instant.now())
                         .providerReported(lastUsage)
