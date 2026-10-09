@@ -121,37 +121,35 @@ mixinfer:
 
 **推荐**：V0.3 之后的新配置应使用 `targets` 格式。`provider` 单字段形式仅为向后兼容保留，不在文档中作为主推格式。
 
-### Decision 2: 路由、健康过滤、选择、执行是四个独立的关注点
+### Decision 2: 路由准备与执行分离；准备步骤共享，执行步骤不共享
 
-数据流必须是：
+**准备阶段**（被 `handle` 和 `handleStream` 共享）：
 
-```
-ModelRouter.route(model)
-        ↓ List<RouteTarget>（原始候选）
-EndpointHealthTracker.filter(candidates)
-        ↓ List<RouteTarget>（过滤掉不健康的）
-EndpointSelector.order(filtered)
-        ↓ List<RouteTarget>（最终有序候选）
-FailoverExecutor.execute(ordered)
-        ↓ 结果或抛异常
+```text
+RoutePlanner.plan(model)
+    = ModelRouter.route(model)
+    → EndpointHealthTracker.filter(candidates)
+    → EndpointSelector.order(healthy)
+        ↓ List<RouteTarget>（有序、已过滤的健康候选）
 ```
 
-**每个阶段只做一件事**：
+**执行阶段**（两条路径各自实现，不抽公共接口）：
+
+- **非流式**：`ChatCompletionService.handle`——一个循环遍历有序候选，失败可重试下一个，任一成功即返回。
+- **流式**：`ChatCompletionService.handleStream`——分两个阶段：**open 阶段**可 failover（响应未提交），**forward 阶段**禁止 failover（响应已提交）。
+
+**理由**：路由准备是纯粹的、无副作用的数据变换——Router、HealthTracker、Selector 三者之间的组合对所有调用方一致，封装成 `RoutePlanner` 价值明确。
+
+**执行步骤不抽公共抽象**：流式与非流式在"是否允许中途切换上游"、"返回值类型"、"与客户端的交互方式"三个维度上差异过大。强行合并会得到两个无关接口拼在一个类里，抽象的共性不成立。
+
+**拒绝的抽象**：`FailoverExecutor` 曾作为候选，但它要么分裂成两个方法（`executeNonStreaming` / `openStreaming`），要么在实现里按 streaming 分支。两者都违反"抽象应该有真正的共性"这一原则。
 
 | 阶段 | 职责 | 不负责 |
 |---|---|---|
 | Router | 从配置解析出候选列表 | 不感知健康状态、不做选择 |
 | HealthTracker | 过滤掉不健康的候选 | 不排序、不感知配置 |
 | Selector | 对候选排序 | 不感知健康、不执行 |
-| Executor | 按顺序尝试，失败时切换 | 不做路由、不做健康判断 |
 
-**理由**：
-
-- 如果 `ModelRouter` 直接管理健康状态，它就会变成"路由 + 健康 + 选择"的大杂烩。V0.4 引入成本感知路由时无处安放。
-- Selector 作为独立 SPI，V0.3.1 可以加 `WeightedRandomSelector`，V0.4 可以加 `CostAwareSelector`，不需要改 Router。
-- HealthTracker 独立后，未来可以做分布式健康状态（多实例共享 Redis）而不影响其他组件。
-
-**V0.3.0 只提供一个 Selector 实现**：`SequentialSelector`（即按声明顺序返回，不做任何变换）。它存在的意义是**锁定 SPI**，而不是提供算法。
 
 ### Decision 3: 失败按 FailureType 分类，不按 Java 异常类型
 
@@ -334,7 +332,7 @@ with a timer, which adds complexity not justified by V0.3's scope.
 
 - **单点故障可恢复**：上游临时故障会被自动绕过
 - **配置驱动**：新加备份上游不需要改代码
-- **关注点分离**：Router / Health / Selector / Executor 各自独立，未来演进不互相污染
+- **关注点分离**：Router / Health / Selector 收敛到 `RoutePlanner`，未来演进不互相污染
 - **失败语义明确**：FailureType 枚举是可靠性策略的**可读表达**
 - **流式边界明确**：Failover Window 是白纸黑字的规则，不是"看情况"
 
@@ -356,57 +354,60 @@ with a timer, which adds complexity not justified by V0.3's scope.
 
 - **优点**：一次设计到位，V0.3.1 无需改结构
 - **拒绝理由**：
-    - `weight` 属于流量分配，`priority` 属于故障转移，两者是不同问题
-    - 一旦引入 `weight`，需要回答"随机方式"、"健康节点如何参与"、"fallback 后是否重新随机"等一系列未决问题
-    - 声明顺序已经能表达 `priority`，无需显式字段
+  - `weight` 属于流量分配，`priority` 属于故障转移，两者是不同问题
+  - 一旦引入 `weight`，需要回答"随机方式"、"健康节点如何参与"、"fallback 后是否重新随机"等一系列未决问题
+  - 声明顺序已经能表达 `priority`，无需显式字段
 - **演进路径**：V0.3.1 需要时再引入 `weight` 字段；V0.4 引入 `priority` 字段
 
 ### Alternative 2: 用 `instanceof ProviderException` 判定是否 failover
 
 - **优点**：实现最快
 - **拒绝理由**：
-    - `ProviderException` 是一个笼统的异常类型，包含"应重试"和"不应重试"两类失败
-    - 401 / 400 也是 ProviderException，但换上游无效
-    - 无法表达"歧义失败保守处理"的语义
+  - `ProviderException` 是一个笼统的异常类型，包含"应重试"和"不应重试"两类失败
+  - 401 / 400 也是 ProviderException，但换上游无效
+  - 无法表达"歧义失败保守处理"的语义
 
 ### Alternative 3: 同 Endpoint 重试 + 跨 Endpoint Fallback 都做
 
 - **优点**：可靠性更强
 - **拒绝理由**：
-    - LLM 请求**不具备通用幂等性**。同 Endpoint 重试可能重复计费
-    - 重试与 Fallback 是两个独立的可靠性维度，V0.3 只做 Fallback
-    - 减少概念数量，降低配置负担
+  - LLM 请求**不具备通用幂等性**。同 Endpoint 重试可能重复计费
+  - 重试与 Fallback 是两个独立的可靠性维度，V0.3 只做 Fallback
+  - 减少概念数量，降低配置负担
 
 ### Alternative 4: 使用 Circuit Breaker（熔断器）
 
 - **优点**：成熟的可靠性模式；状态机明确
 - **拒绝理由**：
-  - 完整的 Circuit Breaker 需要 half-open 状态和主动探测。在
-    HealthTracker 里做 half-open 等价于"定时向每个 unhealthy 的
-    Endpoint 发探测请求"，这在 LLM 场景下会产生费用——**探测请求
-    也是真实调用**。
-  - HealthTracker 的冷却恢复机制（T 秒后自动恢复为 healthy）是
-    **零成本的替代方案**：不需要额外的探测流量，只需要等下一次真实
-    请求来验证。
-  - 引入 Circuit Breaker 库会与 HealthTracker 职责重叠，需要额外的
-    协调设计。
+  - 完整的 Circuit Breaker 需要 half-open 状态和主动探测。在 HealthTracker 里做 half-open 等价于"定时向每个 unhealthy 的 Endpoint 发探测请求"，这在 LLM 场景下会产生费用——**探测请求也是真实调用**。
+  - HealthTracker 的冷却恢复机制（T 秒后自动恢复为 healthy）是**零成本的替代方案**：不需要额外的探测流量，只需要等下一次真实请求来验证。
+  - 引入 Circuit Breaker 库会与 HealthTracker 职责重叠，需要额外的协调设计。
   - 这不是"没时间做"，而是"做了反而有副作用"。
 
 ### Alternative 5: 用 Redis 做分布式健康状态
 
 - **优点**：多实例共享状态
 - **拒绝理由**：
-    - V0.3 不做 Control Plane，也不做分布式协调
-    - 引入 Redis 会带来部署依赖、网络故障、序列化等问题
-    - 单实例健康状态已经能覆盖 V0.3 的目标场景
+  - V0.3 不做 Control Plane，也不做分布式协调
+  - 引入 Redis 会带来部署依赖、网络故障、序列化等问题
+  - 单实例健康状态已经能覆盖 V0.3 的目标场景
 
 ### Alternative 6: 流式中途断流时切换上游
 
 - **优点**：表面上看恢复能力更强
 - **拒绝理由**：
-    - 客户端已经收到部分输出，切换上游会导致响应拼接
-    - 语义上不可接受——"你好，我认为这个问" + "题是错的"会被用户理解为模型说了两段话
-    - 保守优先于可用性
+  - 客户端已经收到部分输出，切换上游会导致响应拼接
+  - 语义上不可接受——"你好，我认为这个问" + "题是错的"会被用户理解为模型说了两段话
+  - 保守优先于可用性
+
+### Alternative 7: 抽取 `FailoverExecutor` 统一执行阶段
+
+- **优点**：四阶段管道对称美观，与 Decision 2 初稿的架构图一致
+- **拒绝理由**：
+  - 流式与非流式在"是否允许中途切换上游"、"返回值类型"、"与客户端的交互方式"三个维度上差异过大
+  - 强行合并会得到 `executeNonStreaming` / `openStreaming` 两个方法拼在一个类里，或在实现里按 streaming 分支
+  - 两种结果都违反"抽象应该有真正的共性"——`FailoverExecutor` 封装的是**执行步骤**，而执行步骤并无共性
+- **替代方案**：抽取 `RoutePlanner` 统一**准备阶段**（Router → HealthTracker → Selector 三步，两条路径完全相同），执行循环由 `handle` / `handleStream` 各自持有，仅共享 `FailureClassifier` 做分类判定
 
 ## References
 
