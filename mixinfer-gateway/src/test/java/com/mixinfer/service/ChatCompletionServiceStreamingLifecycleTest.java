@@ -1,6 +1,7 @@
 package com.mixinfer.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.mixinfer.config.MixInferProperties;
 import com.mixinfer.converter.LlmToOpenAIConverter;
 import com.mixinfer.converter.LlmToOpenAIStreamConverter;
 import com.mixinfer.converter.OpenAIToLlmConverter;
@@ -12,7 +13,8 @@ import com.mixinfer.openai.OpenAIMessage;
 import com.mixinfer.provider.LlmStream;
 import com.mixinfer.provider.ProviderRegistry;
 import com.mixinfer.provider.StreamingLlmProvider;
-import com.mixinfer.router.*;
+import com.mixinfer.router.Endpoint;
+import com.mixinfer.router.RoutePlanner;
 import com.mixinfer.router.failure.DefaultFailureClassifier;
 import com.mixinfer.router.health.EndpointHealthTracker;
 import com.mixinfer.streaming.StreamingResponseWriter;
@@ -94,46 +96,24 @@ class ChatCompletionServiceStreamingLifecycleTest {
     }
 
     private ChatCompletionService buildServiceWithProvider(StreamingLlmProvider provider) {
-        ObjectMapper objectMapper = new ObjectMapper();
+        ObjectMapper om = new ObjectMapper();
+        MixInferProperties properties = ChatCompletionServiceTestFixtures.singleTargetProperties(provider.name());
+        EndpointHealthTracker health = ChatCompletionServiceTestFixtures.noopHealth();
+        RoutePlanner planner = ChatCompletionServiceTestFixtures.planner(properties, health);
 
-        // Build a Registry with only the streaming side populated.
         ProviderRegistry registry = new ProviderRegistry(
                 List.of(),
                 List.of(provider));
 
-        // Build a router that maps "gpt-4o-mini" to an endpoint named after the provider.
-        com.mixinfer.config.MixInferProperties properties = new com.mixinfer.config.MixInferProperties();
-        com.mixinfer.config.MixInferProperties.ProviderConfig cfg = new com.mixinfer.config.MixInferProperties.ProviderConfig();
-        cfg.setName(provider.name());
-        cfg.setBaseUrl("http://unused");
-        cfg.setApiKey("k");
-        properties.setProviders(List.of(cfg));
-
-        com.mixinfer.config.MixInferProperties.RouteConfig route = new com.mixinfer.config.MixInferProperties.RouteConfig();
-        route.setModel("gpt-4o-mini");
-        route.setProvider(provider.name());
-        properties.setRoutes(List.of(route));
-
-        ModelRouter router = new ModelRouter(properties);
-
-        EndpointHealthTracker noopHealth = new EndpointHealthTracker() {
-            @Override public List<RouteTarget> filter(List<RouteTarget> c) { return c; }
-            @Override public void recordSuccess(Endpoint e) {}
-            @Override public void recordFailure(Endpoint e) {}
-        };
-
-        EndpointSelector sequential = c -> c;
-        RoutePlanner planner = new RoutePlanner(router, noopHealth, sequential);
-
         return new ChatCompletionService(
                 new OpenAIToLlmConverter(),
                 new LlmToOpenAIConverter(),
-                new LlmToOpenAIStreamConverter(objectMapper),
+                new LlmToOpenAIStreamConverter(om),
                 planner,
                 registry,
-                new StreamingResponseWriter(objectMapper),
+                new StreamingResponseWriter(om),
                 r -> {},
-                noopHealth,
+                health,
                 new DefaultFailureClassifier());
     }
 

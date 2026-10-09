@@ -87,42 +87,14 @@ class ChatCompletionServiceFailoverTest {
 
     private ChatCompletionService buildService(LlmProvider provider) {
         ObjectMapper om = new ObjectMapper();
-
-        MixInferProperties properties = new MixInferProperties();
-
-        MixInferProperties.ProviderConfig p1 = new MixInferProperties.ProviderConfig();
-        p1.setName("primary");
-        p1.setBaseUrl("http://primary");
-        p1.setApiKey("k1");
-        MixInferProperties.ProviderConfig p2 = new MixInferProperties.ProviderConfig();
-        p2.setName("backup");
-        p2.setBaseUrl("http://backup");
-        p2.setApiKey("k2");
-        properties.setProviders(List.of(p1, p2));
-
-        MixInferProperties.TargetConfig t1 = new MixInferProperties.TargetConfig();
-        t1.setProvider("primary");
-        MixInferProperties.TargetConfig t2 = new MixInferProperties.TargetConfig();
-        t2.setProvider("backup");
-        MixInferProperties.RouteConfig route = new MixInferProperties.RouteConfig();
-        route.setModel("gpt-4o-mini");
-        route.setTargets(List.of(t1, t2));
-        properties.setRoutes(List.of(route));
-
-        ModelRouter router = new ModelRouter(properties);
+        MixInferProperties properties = ChatCompletionServiceTestFixtures.twoTargetProperties();
+        EndpointHealthTracker health = ChatCompletionServiceTestFixtures.noopHealth();
+        RoutePlanner planner = ChatCompletionServiceTestFixtures.planner(properties, health);
 
         ProviderRegistry registry = new ProviderRegistry(
                 List.of(new NamedProvider("primary", provider),
                         new NamedProvider("backup", provider)),
                 List.of());
-
-        EndpointHealthTracker noopHealth = new EndpointHealthTracker() {
-            @Override public List<RouteTarget> filter(List<RouteTarget> c) { return c; }
-            @Override public void recordSuccess(Endpoint e) {}
-            @Override public void recordFailure(Endpoint e) {}
-        };
-
-        RoutePlanner planner = new RoutePlanner(router, noopHealth, c -> c);
 
         return new ChatCompletionService(
                 new OpenAIToLlmConverter(),
@@ -132,7 +104,7 @@ class ChatCompletionServiceFailoverTest {
                 registry,
                 new StreamingResponseWriter(om),
                 r -> {},
-                noopHealth,
+                health,
                 new DefaultFailureClassifier());
     }
 
