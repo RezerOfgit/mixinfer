@@ -30,6 +30,7 @@ class OpenAICompatibleStreamingProviderTest {
         server = new MockWebServer();
         server.start();
         provider = new OpenAICompatibleStreamingProvider(
+                new RestClientFactory(),
                 new ObjectMapper(),
                 new LlmToOpenAIConverter(),
                 new OpenAIStreamConverter());
@@ -106,10 +107,11 @@ class OpenAICompatibleStreamingProviderTest {
 
     private Endpoint buildEndpoint() {
         return Endpoint.builder()
-                .provider("openai-compatible")
-                .baseUrl(server.url("/v1").toString().replaceAll("/$", ""))
-                .apiKey("test-key")
-                .timeout(Duration.ofSeconds(5))
+                .provider("test")
+                .baseUrl(server.url("/v1").toString())
+                .apiKey("k")
+                .connectTimeout(Duration.ofSeconds(5))
+                .requestTimeout(Duration.ofSeconds(30))
                 .build();
     }
 }

@@ -45,6 +45,15 @@ public class MixInferProperties {
         private String baseUrl;
         private String apiKey;
         private List<String> models = new ArrayList<>();
+
+        /** Connect timeout in seconds. Default 5. */
+        private int connectTimeoutSeconds = 5;
+
+        /** Request timeout in seconds (non-streaming). Default 120. */
+        private int requestTimeoutSeconds = 120;
+
+        /** Idle timeout in seconds (streaming). Default 30. */
+//        private int idleTimeoutSeconds = 30;
     }
 
     /**

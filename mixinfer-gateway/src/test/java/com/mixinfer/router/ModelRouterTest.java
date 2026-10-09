@@ -21,7 +21,8 @@ class ModelRouterTest {
         Endpoint endpoint = targets.get(0).getEndpoint();
         assertThat(endpoint.getProvider()).isEqualTo("openai-compatible");
         assertThat(endpoint.getBaseUrl()).isEqualTo("https://api.example.com/v1");
-        assertThat(endpoint.getTimeout()).isNotNull();
+        assertThat(endpoint.getConnectTimeout()).isNotNull();
+        assertThat(endpoint.getRequestTimeout()).isNotNull();
     }
 
     @Test

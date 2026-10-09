@@ -31,17 +31,16 @@ public class OpenAICompatibleStreamingProvider implements StreamingLlmProvider {
     private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(10);
     private static final Logger log = LoggerFactory.getLogger(OpenAICompatibleStreamingProvider.class);
 
-    private final HttpClient httpClient;
+    private final RestClientFactory restClientFactory;
     private final ObjectMapper objectMapper;
     private final LlmToOpenAIConverter outboundConverter;
     private final OpenAIStreamConverter streamConverter;
 
-    public OpenAICompatibleStreamingProvider(ObjectMapper objectMapper,
+    public OpenAICompatibleStreamingProvider(RestClientFactory restClientFactory,
+                                             ObjectMapper objectMapper,
                                              LlmToOpenAIConverter outboundConverter,
                                              OpenAIStreamConverter streamConverter) {
-        this.httpClient = HttpClient.newBuilder()
-                .connectTimeout(CONNECT_TIMEOUT)
-                .build();
+        this.restClientFactory = restClientFactory;
         this.objectMapper = objectMapper;
         this.outboundConverter = outboundConverter;
         this.streamConverter = streamConverter;
@@ -52,7 +51,25 @@ public class OpenAICompatibleStreamingProvider implements StreamingLlmProvider {
         OpenAIChatRequest upstreamRequest = outboundConverter.toOpenAIRequest(request);
         upstreamRequest.setStream(true);
 
-        HttpRequest httpRequest = buildHttpRequest(upstreamRequest, endpoint);
+        String json;
+        try {
+            json = objectMapper.writeValueAsString(upstreamRequest);
+        } catch (IOException e) {
+            throw new ProviderException("Failed to serialize request body", e);
+        }
+
+        HttpClient httpClient = restClientFactory.httpClient(endpoint);
+
+        HttpRequest httpRequest = HttpRequest.newBuilder()
+                .uri(URI.create(endpoint.getBaseUrl() + CHAT_COMPLETIONS_PATH))
+                .header("Authorization", "Bearer " + endpoint.getApiKey())
+                .header("Content-Type", "application/json")
+                .header("Accept", "text/event-stream")
+//                .timeout(endpoint.getIdleTimeout())
+                .timeout(endpoint.getRequestTimeout())
+                .POST(HttpRequest.BodyPublishers.ofString(json))
+                .build();
+
         log.debug("Opening upstream stream to {}", endpoint.getBaseUrl());
 
         try {
@@ -76,21 +93,6 @@ public class OpenAICompatibleStreamingProvider implements StreamingLlmProvider {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new ProviderException("Interrupted while opening upstream stream", e);
-        }
-    }
-
-    private HttpRequest buildHttpRequest(OpenAIChatRequest body, Endpoint endpoint) {
-        try {
-            String json = objectMapper.writeValueAsString(body);
-            return HttpRequest.newBuilder()
-                    .uri(URI.create(endpoint.getBaseUrl() + CHAT_COMPLETIONS_PATH))
-                    .header("Authorization", "Bearer " + endpoint.getApiKey())
-                    .header("Content-Type", "application/json")
-                    .header("Accept", "text/event-stream")
-                    .POST(HttpRequest.BodyPublishers.ofString(json))
-                    .build();
-        } catch (IOException e) {
-            throw new ProviderException("Failed to serialize request body", e);
         }
     }
 

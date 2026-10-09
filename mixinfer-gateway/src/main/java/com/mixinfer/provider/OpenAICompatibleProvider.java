@@ -26,13 +26,14 @@ public class OpenAICompatibleProvider implements LlmProvider {
 
     private static final String CHAT_COMPLETIONS_PATH = "/chat/completions";
 
-    private final RestClient restClient;
+    private final RestClientFactory restClientFactory;
     private final OpenAIToLlmConverter inboundConverter;
     private final LlmToOpenAIConverter outboundConverter;
 
-    public OpenAICompatibleProvider(OpenAIToLlmConverter inboundConverter,
+    public OpenAICompatibleProvider(RestClientFactory restClientFactory,
+                                    OpenAIToLlmConverter inboundConverter,
                                     LlmToOpenAIConverter outboundConverter) {
-        this.restClient = RestClient.builder().build();
+        this.restClientFactory = restClientFactory;
         this.inboundConverter = inboundConverter;
         this.outboundConverter = outboundConverter;
     }
@@ -47,6 +48,7 @@ public class OpenAICompatibleProvider implements LlmProvider {
         OpenAIChatRequest upstreamRequest = outboundConverter.toOpenAIRequest(request);
 
         try {
+            RestClient restClient = restClientFactory.restClient(endpoint);
             OpenAIChatResponse upstreamResponse = restClient.post()
                     .uri(endpoint.getBaseUrl() + CHAT_COMPLETIONS_PATH)
                     .header(HttpHeaders.AUTHORIZATION, "Bearer " + endpoint.getApiKey())

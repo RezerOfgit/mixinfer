@@ -132,7 +132,8 @@ class InMemoryEndpointHealthTrackerTest {
                 .provider(provider)
                 .baseUrl("http://" + provider)
                 .apiKey("k")
-                .timeout(Duration.ofSeconds(30))
+                .connectTimeout(Duration.ofSeconds(5))
+                .requestTimeout(Duration.ofSeconds(30))
                 .build();
     }
 

@@ -321,6 +321,13 @@ V0.2 只有单一的 `timeout` 字段。V0.3 拆分为：
 **V0.3 实现 `connectTimeout`、`requestTimeout`（非流式）、`idleTimeout`（流式）。**
 `streamLifetime` 留到 V0.3.1 或 V0.4，因为它的默认值很难定（模型可以生成 10 分钟，强行切断会打断正常请求）。
 
+### Decision 8:
+
+V0.3 uses `requestTimeout` as the total time budget for both non-streaming requests 
+and streaming requests (total stream lifetime). True idle-timeout semantics 
+(maximum gap between chunks) is deferred to V0.3.1; implementing it requires asynchronous reads 
+with a timer, which adds complexity not justified by V0.3's scope.
+
 ## Consequences
 
 ### Positive

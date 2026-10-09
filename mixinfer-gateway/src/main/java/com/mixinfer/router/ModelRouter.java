@@ -18,7 +18,7 @@ import java.util.stream.Collectors;
 @Component
 public class ModelRouter {
 
-    private static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(30);
+//    private static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(30);
 
     private final Map<String, List<RouteTarget>> routes;
 
@@ -78,7 +78,9 @@ public class ModelRouter {
                 .provider(provider.getName())
                 .baseUrl(provider.getBaseUrl())
                 .apiKey(provider.getApiKey())
-                .timeout(DEFAULT_TIMEOUT)
+                .connectTimeout(Duration.ofSeconds(provider.getConnectTimeoutSeconds()))
+                .requestTimeout(Duration.ofSeconds(provider.getRequestTimeoutSeconds()))
+//                .idleTimeout(Duration.ofSeconds(provider.getIdleTimeoutSeconds()))
                 .build();
 
         return RouteTarget.builder().endpoint(endpoint).build();

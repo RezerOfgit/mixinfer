@@ -7,21 +7,23 @@ import java.time.Duration;
 
 /**
  * A resolved endpoint: a provider plus the connection details
- * needed to invoke it.
+ * needed to invoke it, including per-endpoint timeouts.
  */
 @Value
 @Builder
 public class Endpoint {
 
-    /** Name of the provider handling this endpoint. */
     String provider;
-
-    /** Base URL of the upstream API, e.g. https://api.openai.com/v1. */
     String baseUrl;
-
-    /** API key used to authenticate against the upstream. */
     String apiKey;
 
-    /** HTTP timeout for a single call. */
-    Duration timeout;
+    /** Connect timeout. Used by both streaming and non-streaming clients. */
+    Duration connectTimeout;
+
+    /** Request timeout. Used by non-streaming clients only. */
+    /** Non-streaming: full request. Streaming: total stream lifetime. */
+    Duration requestTimeout;
+
+    /** Idle timeout. Used by streaming clients only. */
+//    Duration idleTimeout;
 }
