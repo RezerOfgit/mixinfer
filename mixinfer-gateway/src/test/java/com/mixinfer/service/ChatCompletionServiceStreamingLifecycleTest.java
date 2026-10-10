@@ -31,10 +31,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.when;
 
-/**
- * Verifies the lifecycle behavior of ChatCompletionService.handleStream
- * without starting Spring: client disconnect MUST close the upstream stream.
- */
 class ChatCompletionServiceStreamingLifecycleTest {
 
     @Test
@@ -75,7 +71,6 @@ class ChatCompletionServiceStreamingLifecycleTest {
 
         ChatCompletionService service = buildServiceWithProvider(fakeProvider);
 
-        // Mock ServletOutputStream so flush() throws (client disconnected).
         HttpServletResponse response = Mockito.mock(HttpServletResponse.class);
         jakarta.servlet.ServletOutputStream out =
                 Mockito.mock(jakarta.servlet.ServletOutputStream.class);
@@ -102,6 +97,7 @@ class ChatCompletionServiceStreamingLifecycleTest {
         RoutePlanner planner = ChatCompletionServiceTestFixtures.planner(properties, health);
 
         ProviderRegistry registry = new ProviderRegistry(
+                properties,
                 List.of(),
                 List.of(provider));
 
@@ -154,7 +150,6 @@ class ChatCompletionServiceStreamingLifecycleTest {
 
         ChatCompletionService service = buildServiceWithProvider(fakeProvider);
 
-        // Capture all bytes written to the response via a real ServletOutputStream.
         java.io.ByteArrayOutputStream buf = new java.io.ByteArrayOutputStream();
         jakarta.servlet.ServletOutputStream out = new jakarta.servlet.ServletOutputStream() {
             @Override

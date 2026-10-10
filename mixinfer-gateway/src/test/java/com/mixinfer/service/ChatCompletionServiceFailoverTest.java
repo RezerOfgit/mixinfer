@@ -11,12 +11,10 @@ import com.mixinfer.exception.ProviderException;
 import com.mixinfer.openai.OpenAIChatRequest;
 import com.mixinfer.openai.OpenAIMessage;
 import com.mixinfer.provider.LlmProvider;
+import com.mixinfer.provider.LlmStream;
 import com.mixinfer.provider.ProviderRegistry;
 import com.mixinfer.provider.StreamingLlmProvider;
-import com.mixinfer.router.Endpoint;
-import com.mixinfer.router.ModelRouter;
 import com.mixinfer.router.RoutePlanner;
-import com.mixinfer.router.RouteTarget;
 import com.mixinfer.router.failure.DefaultFailureClassifier;
 import com.mixinfer.router.health.EndpointHealthTracker;
 import com.mixinfer.streaming.StreamingResponseWriter;
@@ -35,8 +33,8 @@ class ChatCompletionServiceFailoverTest {
         AtomicInteger calls = new AtomicInteger();
 
         LlmProvider provider = new LlmProvider() {
-            @Override public String name() { return "test"; }
-            @Override public LlmResponse invoke(LlmRequest r, Endpoint e) {
+            @Override public String name() { return "openai-compatible"; }
+            @Override public LlmResponse invoke(LlmRequest r, com.mixinfer.router.Endpoint e) {
                 calls.incrementAndGet();
                 if (e.getProvider().equals("primary")) {
                     throw new ProviderException("boom", 500);
@@ -66,8 +64,8 @@ class ChatCompletionServiceFailoverTest {
         AtomicInteger calls = new AtomicInteger();
 
         LlmProvider provider = new LlmProvider() {
-            @Override public String name() { return "test"; }
-            @Override public LlmResponse invoke(LlmRequest r, Endpoint e) {
+            @Override public String name() { return "openai-compatible"; }
+            @Override public LlmResponse invoke(LlmRequest r, com.mixinfer.router.Endpoint e) {
                 calls.incrementAndGet();
                 throw new ProviderException("auth", 401);
             }
@@ -85,57 +83,18 @@ class ChatCompletionServiceFailoverTest {
         assertThat(calls.get()).isEqualTo(1);   // no failover
     }
 
-    private ChatCompletionService buildService(LlmProvider provider) {
-        ObjectMapper om = new ObjectMapper();
-        MixInferProperties properties = ChatCompletionServiceTestFixtures.twoTargetProperties();
-        EndpointHealthTracker health = ChatCompletionServiceTestFixtures.noopHealth();
-        RoutePlanner planner = ChatCompletionServiceTestFixtures.planner(properties, health);
-
-        ProviderRegistry registry = new ProviderRegistry(
-                List.of(new NamedProvider("primary", provider),
-                        new NamedProvider("backup", provider)),
-                List.of());
-
-        return new ChatCompletionService(
-                new OpenAIToLlmConverter(),
-                new LlmToOpenAIConverter(),
-                new LlmToOpenAIStreamConverter(om),
-                planner,
-                registry,
-                new StreamingResponseWriter(om),
-                r -> {},
-                health,
-                new DefaultFailureClassifier());
-    }
-
-    private static final class NamedProvider implements LlmProvider {
-        private final String name;
-        private final LlmProvider delegate;
-        NamedProvider(String name, LlmProvider delegate) {
-            this.name = name;
-            this.delegate = delegate;
-        }
-        @Override public String name() { return name; }
-        @Override public LlmResponse invoke(LlmRequest r, Endpoint e) {
-            return delegate.invoke(r, e);
-        }
-    }
-
     @Test
     void should_failover_streaming_open_on_500() throws Exception {
         AtomicInteger openCalls = new AtomicInteger();
 
         StreamingLlmProvider streamingProvider = new StreamingLlmProvider() {
-            @Override public String name() { return "test"; }
-            @Override public com.mixinfer.provider.LlmStream invokeStream(
-                    LlmRequest r, Endpoint e) {
+            @Override public String name() { return "openai-compatible"; }
+            @Override public LlmStream invokeStream(LlmRequest r, com.mixinfer.router.Endpoint e) {
                 openCalls.incrementAndGet();
                 if (e.getProvider().equals("primary")) {
                     throw new ProviderException("boom", 500);
                 }
-                // Return a stream that emits nothing and ends immediately.
-                return new com.mixinfer.provider.LlmStream() {
-                    private boolean ended = false;
+                return new LlmStream() {
                     @Override public com.mixinfer.domain.LlmStreamChunk next() {
                         return null;
                     }
@@ -167,9 +126,8 @@ class ChatCompletionServiceFailoverTest {
         AtomicInteger openCalls = new AtomicInteger();
 
         StreamingLlmProvider streamingProvider = new StreamingLlmProvider() {
-            @Override public String name() { return "test"; }
-            @Override public com.mixinfer.provider.LlmStream invokeStream(
-                    LlmRequest r, Endpoint e) {
+            @Override public String name() { return "openai-compatible"; }
+            @Override public LlmStream invokeStream(LlmRequest r, com.mixinfer.router.Endpoint e) {
                 openCalls.incrementAndGet();
                 throw new ProviderException("auth", 401);
             }
@@ -189,6 +147,29 @@ class ChatCompletionServiceFailoverTest {
                 .isInstanceOf(ProviderException.class);
 
         assertThat(openCalls.get()).isEqualTo(1);   // no failover
+    }
+
+    private ChatCompletionService buildService(LlmProvider provider) {
+        ObjectMapper om = new ObjectMapper();
+        MixInferProperties properties = ChatCompletionServiceTestFixtures.twoTargetProperties();
+        EndpointHealthTracker health = ChatCompletionServiceTestFixtures.noopHealth();
+        RoutePlanner planner = ChatCompletionServiceTestFixtures.planner(properties, health);
+
+        ProviderRegistry registry = new ProviderRegistry(
+                properties,
+                List.of(provider),
+                List.of());
+
+        return new ChatCompletionService(
+                new OpenAIToLlmConverter(),
+                new LlmToOpenAIConverter(),
+                new LlmToOpenAIStreamConverter(om),
+                planner,
+                registry,
+                new StreamingResponseWriter(om),
+                r -> {},
+                health,
+                new DefaultFailureClassifier());
     }
 
     private ChatCompletionService buildStreamingService(StreamingLlmProvider provider) {
@@ -215,20 +196,13 @@ class ChatCompletionServiceFailoverTest {
         route.setTargets(List.of(t1, t2));
         properties.setRoutes(List.of(route));
 
-        ModelRouter router = new ModelRouter(properties);
+        RoutePlanner planner = ChatCompletionServiceTestFixtures.planner(properties,
+                ChatCompletionServiceTestFixtures.noopHealth());
 
         ProviderRegistry registry = new ProviderRegistry(
+                properties,
                 List.of(),
-                List.of(new NamedStreamingProvider("primary", provider),
-                        new NamedStreamingProvider("backup", provider)));
-
-        EndpointHealthTracker noopHealth = new EndpointHealthTracker() {
-            @Override public List<RouteTarget> filter(List<RouteTarget> c) { return c; }
-            @Override public void recordSuccess(Endpoint e) {}
-            @Override public void recordFailure(Endpoint e) {}
-        };
-
-        RoutePlanner planner = new RoutePlanner(router, noopHealth, c -> c);
+                List.of(provider));
 
         return new ChatCompletionService(
                 new OpenAIToLlmConverter(),
@@ -238,20 +212,7 @@ class ChatCompletionServiceFailoverTest {
                 registry,
                 new StreamingResponseWriter(om),
                 r -> {},
-                noopHealth,
+                ChatCompletionServiceTestFixtures.noopHealth(),
                 new DefaultFailureClassifier());
-    }
-
-    private static final class NamedStreamingProvider implements com.mixinfer.provider.StreamingLlmProvider {
-        private final String name;
-        private final com.mixinfer.provider.StreamingLlmProvider delegate;
-        NamedStreamingProvider(String name, com.mixinfer.provider.StreamingLlmProvider delegate) {
-            this.name = name;
-            this.delegate = delegate;
-        }
-        @Override public String name() { return name; }
-        @Override public com.mixinfer.provider.LlmStream invokeStream(LlmRequest r, Endpoint e) {
-            return delegate.invokeStream(r, e);
-        }
     }
 }
