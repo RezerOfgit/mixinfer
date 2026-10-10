@@ -42,6 +42,13 @@ public class MixInferProperties {
     @Data
     public static class ProviderConfig {
         private String name;
+
+        /**
+         * Provider implementation type. Defaults to "openai-compatible",
+         * the only built-in implementation in V0.3.
+         */
+        private String type = "openai-compatible";
+
         private String baseUrl;
         private String apiKey;
         private List<String> models = new ArrayList<>();

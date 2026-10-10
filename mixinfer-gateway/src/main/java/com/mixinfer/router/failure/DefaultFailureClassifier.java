@@ -46,16 +46,25 @@ public class DefaultFailureClassifier implements FailureClassifier {
     }
 
     private FailureType classifyCause(Throwable cause) {
-        if (cause == null) {
-            return FailureType.UNKNOWN;
+        Throwable current = cause;
+        while (current != null) {
+            FailureType type = classifyOne(current);
+            if (type != FailureType.UNKNOWN) {
+                return type;
+            }
+            current = current.getCause();
         }
-        if (cause instanceof ConnectException || cause instanceof UnknownHostException) {
+        return FailureType.UNKNOWN;
+    }
+
+    private FailureType classifyOne(Throwable t) {
+        if (t instanceof ConnectException || t instanceof UnknownHostException) {
             return FailureType.CONNECTION_FAILURE;
         }
-        if (cause instanceof HttpConnectTimeoutException) {
+        if (t instanceof HttpConnectTimeoutException) {
             return FailureType.CONNECT_TIMEOUT;
         }
-        if (cause instanceof HttpTimeoutException || cause instanceof SocketTimeoutException) {
+        if (t instanceof HttpTimeoutException || t instanceof SocketTimeoutException) {
             return FailureType.READ_TIMEOUT;
         }
         return FailureType.UNKNOWN;
