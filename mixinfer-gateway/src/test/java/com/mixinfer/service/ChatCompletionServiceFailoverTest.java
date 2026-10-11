@@ -14,12 +14,16 @@ import com.mixinfer.provider.LlmProvider;
 import com.mixinfer.provider.LlmStream;
 import com.mixinfer.provider.ProviderRegistry;
 import com.mixinfer.provider.StreamingLlmProvider;
+import com.mixinfer.router.Endpoint;
 import com.mixinfer.router.RoutePlanner;
+import com.mixinfer.router.RouteTarget;
 import com.mixinfer.router.failure.DefaultFailureClassifier;
 import com.mixinfer.router.health.EndpointHealthTracker;
+import com.mixinfer.router.health.InMemoryEndpointHealthTracker;
 import com.mixinfer.streaming.StreamingResponseWriter;
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -150,9 +154,13 @@ class ChatCompletionServiceFailoverTest {
     }
 
     private ChatCompletionService buildService(LlmProvider provider) {
+        return buildService(provider, ChatCompletionServiceTestFixtures.noopHealth());
+    }
+
+    private ChatCompletionService buildService(LlmProvider provider,
+                                               EndpointHealthTracker health) {
         ObjectMapper om = new ObjectMapper();
         MixInferProperties properties = ChatCompletionServiceTestFixtures.twoTargetProperties();
-        EndpointHealthTracker health = ChatCompletionServiceTestFixtures.noopHealth();
         RoutePlanner planner = ChatCompletionServiceTestFixtures.planner(properties, health);
 
         ProviderRegistry registry = new ProviderRegistry(
@@ -214,5 +222,52 @@ class ChatCompletionServiceFailoverTest {
                 r -> {},
                 ChatCompletionServiceTestFixtures.noopHealth(),
                 new DefaultFailureClassifier());
+    }
+
+    @Test
+    void should_not_pollute_health_on_repeated_401() {
+        MixInferProperties props = new MixInferProperties();
+        props.getHealth().setFailureThreshold(2);
+        InMemoryEndpointHealthTracker health = new InMemoryEndpointHealthTracker(props);
+
+        LlmProvider provider = new LlmProvider() {
+            @Override public String name() { return "openai-compatible"; }
+            @Override public LlmResponse invoke(LlmRequest r, Endpoint e) {
+                throw new ProviderException("auth", 401);
+            }
+        };
+
+        ChatCompletionService service = buildService(provider, health);
+
+        for (int i = 0; i < 5; i++) {
+            OpenAIChatRequest request = new OpenAIChatRequest();
+            request.setModel("gpt-4o-mini");
+            request.setMessages(List.of(new OpenAIMessage("user", "hi")));
+            assertThatThrownBy(() -> service.handle(request))
+                    .isInstanceOf(ProviderException.class);
+        }
+
+        Endpoint primary = Endpoint.builder()
+                .provider("primary")
+                .baseUrl("http://primary")
+                .apiKey("k")
+                .connectTimeout(Duration.ofSeconds(5))
+                .requestTimeout(Duration.ofSeconds(30))
+                .build();
+        Endpoint backup = Endpoint.builder()
+                .provider("backup")
+                .baseUrl("http://backup")
+                .apiKey("k")
+                .connectTimeout(Duration.ofSeconds(5))
+                .requestTimeout(Duration.ofSeconds(30))
+                .build();
+
+        List<RouteTarget> candidates = List.of(
+                RouteTarget.builder().endpoint(primary).build(),
+                RouteTarget.builder().endpoint(backup).build());
+
+        assertThat(health.filter(candidates))
+                .as("401 must not pollute health state")
+                .hasSize(2);
     }
 }

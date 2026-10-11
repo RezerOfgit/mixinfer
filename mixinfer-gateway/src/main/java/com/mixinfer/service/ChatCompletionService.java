@@ -116,17 +116,20 @@ public class ChatCompletionService {
 
             } catch (ProviderException e) {
                 FailureType failureType = failureClassifier.classify(e);
-                healthTracker.recordFailure(endpoint);
 
+                if (!failureType.isFailoverable()) {
+                    log.warn("Provider {} failed with non-failoverable type={}: {}",
+                            endpoint.getProvider(), failureType, e.getMessage());
+                    throw e;
+                }
+
+                // Only failoverable failures count against endpoint health.
+                // Auth, invalid request, and model-not-found errors reflect
+                // request configuration, not endpoint availability.
+                healthTracker.recordFailure(endpoint);
                 log.warn("Provider {} failed (type={}, attempt {}/{}): {}",
                         endpoint.getProvider(), failureType, i + 1, ordered.size(),
                         e.getMessage());
-
-                if (!failureType.isFailoverable()) {
-                    log.info("Failure type {} is not failoverable; aborting",
-                            failureType);
-                    throw e;
-                }
 
                 lastError = e;
                 if (isLastAttempt) {
@@ -191,15 +194,17 @@ public class ChatCompletionService {
 
             } catch (ProviderException e) {
                 FailureType failureType = failureClassifier.classify(e);
-                healthTracker.recordFailure(endpoint);
-
-                log.warn("Streaming open failed (type={}, attempt {}/{}): {}",
-                        failureType, i + 1, ordered.size(), e.getMessage());
 
                 if (!failureType.isFailoverable()) {
-                    log.info("Failure type {} is not failoverable; aborting", failureType);
+                    log.warn("Streaming open failed with non-failoverable type={}: {}",
+                            failureType, e.getMessage());
                     throw e;
                 }
+
+                // Only failoverable failures count against endpoint health.
+                healthTracker.recordFailure(endpoint);
+                log.warn("Streaming open failed (type={}, attempt {}/{}): {}",
+                        failureType, i + 1, ordered.size(), e.getMessage());
 
                 lastError = e;
                 if (isLastAttempt) {
