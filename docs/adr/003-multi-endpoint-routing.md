@@ -297,27 +297,32 @@ mixinfer:
     cooldown-seconds: 30
 ```
 
-### Decision 7: 超时模型区分 connect / request / idle，不做统一 lifetime
+### Decision 7: 超时模型区分 connect / request，不做流生命周期上限
 
 V0.2 只有单一的 `timeout` 字段。V0.3 拆分为：
 
-| 超时类型 | 适用场景 | 语义 | 默认值 | V0.3 |
-|---|---|---|---|---|
-| `connectTimeout` | 所有请求 | 建立 TCP/TLS 连接的时间上限 | 5s | ✅ 实现 |
-| `requestTimeout` | 非流式 | 从发送请求到拿到完整响应的时间上限 | 120s | ✅ 实现 |
-| `idleTimeout` | 流式 | 相邻两个 chunk 之间的最大间隔 | 30s | ✅ 实现 |
-| `streamLifetime` | 流式 | 单次流式请求的总时长上限 | — | ❌ 不实现 |
+| 超时类型 | 适用场景 | 语义 | 默认值 |
+|---|---|---|---|
+| `connectTimeout` | 所有请求 | 建立 TCP/TLS 连接的时间上限 | 5s |
+| `requestTimeout` | 非流式 | 从发送请求到拿到完整响应体 | 120s |
+| `requestTimeout` | 流式 | 仅覆盖到上游响应头到达；**不限制整条流的总时长** | 120s |
 
-`requestTimeout` 的 120s 是针对常见模型的经验值。长上下文或推理模型的使用者应显式调高该值。
+**V0.3 明确不提供流生命周期上限（stream lifetime cap）。**
 
-**关键区分**：
+原因：JDK `HttpRequest.timeout()` 在 `BodyHandlers.ofInputStream()` 返回后失效，
+流式 body 的后续读取不受其约束。要实现真正的"流最长时长"或"相邻 chunk 最大间隔"
+（idle timeout），需要异步读取 + 定时取消机制，超出 V0.3 的范围。
 
-- `idleTimeout` 检测"流卡住"——模型 30 秒不发 chunk，说明流异常
-- `streamLifetime` 检测"流太长"——防止无限生成
-- 两者是**不同的概念**，不能混用
+**V0.3 提供的保障**：
+- 建连失败会在 `connectTimeout` 内被检测
+- 上游响应头到达会在 `requestTimeout` 内被检测
+- 上游"从不返回响应头"这种卡死情况会被 `requestTimeout` 兜住
 
-**V0.3 实现 `connectTimeout`、`requestTimeout`（非流式）、`idleTimeout`（流式）。**
-`streamLifetime` 留到 V0.3.1 或 V0.4，因为它的默认值很难定（模型可以生成 10 分钟，强行切断会打断正常请求）。
+**V0.3 不提供的保障**：
+- 上游返回响应头后开始无限生成 chunk，不会被 `requestTimeout` 切断
+
+**文档与实现的对应**：`Endpoint.requestTimeout` 的 JavaDoc、
+`docs/routing.md` 第 7 节、本 ADR 三处的语义必须一致。
 
 ### Decision 8:
 

@@ -178,6 +178,34 @@ V0.3 用 `requestTimeout` 表示总时长上限。V0.3.1 再评估是否引入�
 **per-endpoint 生效**：`connectTimeout` 在 `RestClient` / `HttpClient` 构造时固定，
 因此每个 Endpoint 需要独立的 HTTP client 实例。`RestClientFactory` 按 Endpoint 缓存。
 
+## 7. 超时模型
+
+V0.3 区分两类超时：
+
+| 超时 | 适用场景 | 语义 | 默认值 |
+|---|---|---|---|
+| `connectTimeout` | 所有请求 | 建立 TCP/TLS 连接的时间上限 | 5s |
+| `requestTimeout` | 非流式 | 从发送请求到拿到完整响应体 | 120s |
+| `requestTimeout` | 流式 | **仅覆盖到上游响应头到达**，不限制整条流的生命周期 | 120s |
+
+**V0.3 不提供流的总生命周期上限。**
+
+JDK `HttpRequest.timeout()` 只覆盖到"响应头返回"。一旦 `BodyHandlers.ofInputStream()`
+把 body 流交给调用方，后续的 `InputStream.read()` 不再受该超时约束。也就是说：
+
+```text
+0 秒：请求发送
+1 秒：收到上游响应头          ← requestTimeout 的作用边界
+2 秒：收到第一个 chunk
+...
+180 秒：模型仍在输出 chunk   ← requestTimeout 不再生效
+```
+
+真正的"流最长时长"需要异步读取 + 定时取消，超出 V0.3 的范围，推迟到 V0.3.1。
+
+**per-endpoint 生效**：`connectTimeout` 在 `RestClient` / `HttpClient` 构造时固定，
+因此每个 Endpoint 需要独立的 HTTP client 实例。`RestClientFactory` 按 Endpoint 缓存。
+
 ## 8. 配置示例
 
 ```yaml

@@ -3,6 +3,7 @@ package com.mixinfer.router.failure;
 import com.mixinfer.exception.ProviderException;
 import org.springframework.stereotype.Component;
 
+import javax.net.ssl.SSLException;
 import java.net.ConnectException;
 import java.net.SocketTimeoutException;
 import java.net.UnknownHostException;
@@ -66,6 +67,18 @@ public class DefaultFailureClassifier implements FailureClassifier {
         }
         if (t instanceof HttpTimeoutException || t instanceof SocketTimeoutException) {
             return FailureType.READ_TIMEOUT;
+        }
+        if (t instanceof SSLException) {
+            // TLS handshake or certificate problems.
+            //
+            // Classified as failoverable because a differently-configured
+            // upstream may complete the handshake successfully. The two
+            // sub-cases (transient TLS failure vs. misconfigured
+            // certificate) cannot be distinguished reliably at runtime,
+            // and failover is the less-bad default: the alternative is
+            // to surface a certificate error to the client even though
+            // a working backup exists.
+            return FailureType.CONNECTION_FAILURE;
         }
         return FailureType.UNKNOWN;
     }
