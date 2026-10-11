@@ -1,12 +1,12 @@
-# Streaming in MixInfer
+# MixInfer 流式设计
 
-本文档描述 V0.2 流式数据平面的实现细节。
+本文档描述 V0.2 起的流式数据平面实现细节。
 面向想理解内部机制的读者，与 [ADR-002](adr/002-streaming-data-plane.md) 互补。
 
 ## 1. 数据流
 
-```
-Upstream SSE bytes
+```text
+上游 SSE 字节
        ↓
 SseEventParser            — 拆出每个事件的 data 字段
        ↓
@@ -20,7 +20,7 @@ LlmToOpenAIStreamConverter — 序列化成 OpenAI SSE JSON
        ↓
 StreamingResponseWriter   — 加上 SSE 帧前缀
        ↓
-Client
+客户端
 ```
 
 ## 2. 关键类
@@ -36,7 +36,7 @@ Client
 | `OpenAICompatibleStreamingProvider` | 用 JDK `HttpClient` 打开上游 SSE 连接 |
 | `HttpLlmStream` | `LlmStream` 的 HTTP SSE 实现 |
 
-## 3. 关键陷阱
+## 3. 三个实现陷阱
 
 ### 3.1 PrintWriter 会吞掉 IOException
 
@@ -78,8 +78,10 @@ try (LlmStream stream = provider.invokeStream(...)) {
 | 上游中途断流（SSE 头未发） | 正常抛异常；GlobalExceptionHandler 返回 HTTP 错误 |
 | 正常结束 | 写 `[DONE]`；结算 FINAL（有 usage）或 UNKNOWN（无 usage） |
 
-## 5. 未实现（V0.3+）
+## 5. 未实现（后续版本）
 
-- **Heartbeat**：长连接保活（`: ping\n\n`）。当前依赖上游每隔几秒就会发 chunk；如果上游静默超过 Nginx / LB 的空闲超时，连接会被切断。V0.3 加。
-- **流式重试**：流式请求重试比非流式复杂（部分响应已经发给客户端）。V0.3 加。
-- **多 Endpoint 流式 fallback**：只能在"打开上游"阶段 fallback，不能中途切换。V0.3 设计。
+- **Heartbeat**：长连接保活（`: ping\n\n`）。当前依赖上游每隔几秒就会发 chunk；
+  如果上游静默超过 Nginx / LB 的空闲超时，连接会被切断。V0.3.1 加。
+- **流式重试**：流式请求重试比非流式复杂（部分响应已经发给客户端）。V0.4 设计。
+- **真正的 idle timeout**：相邻 chunk 之间的最大间隔。V0.3 用 `requestTimeout`
+  表示"流总时长上限"，真正的 idle 语义需要异步读取 + 定时器，推迟到 V0.3.1。

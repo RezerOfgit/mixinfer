@@ -1,138 +1,140 @@
-# MixInfer Architecture
+# MixInfer 架构
 
 > 本文档描述 MixInfer 的整体架构与请求链路。
 > 后续版本会在此文档上增量补充，不做破坏性修改。
 
-## 1. Design Goals
+## 1. 设计目标
 
 MixInfer 的核心目标：
 
-> **将客户端的 LLM 请求，经由 MixInfer，可靠地转发到任意 OpenAI-Compatible Endpoint，并以统一格式返回——无论是否流式。**
+> **将客户端的 LLM 请求，经由 MixInfer，可靠地转发到任意 OpenAI 兼容端点，并以统一格式返回——无论是否流式。**
 
-架构设计遵循四条原则：
+架构设计遵循五条原则：
 
 1. **语义先于协议** —— 内部模型（IR）描述"语义"，协议转换器处理"格式"。
 2. **配置驱动** —— Provider / Endpoint / Model 通过配置声明，不硬编码。
-3. **最小可运行** —— 不引入未使用的抽象，不预留未来的扩展点。
+3. **关注点分离** —— 路由准备、健康过滤、选择、执行各自独立。
 4. **可观测** —— 每个请求有 requestId，每次结算有状态。
+5. **诚实降级** —— 不确定时保守处理，不用可用性换正确性。
 
-## 2. High-Level Flow
+## 2. 高层链路
 
 ```mermaid
 flowchart LR
-    Client["Client<br/>(OpenAI SDK / curl)"]
+    Client["客户端<br/>(OpenAI SDK / curl)"]
     Gateway["MixInfer Gateway"]
-    Upstream["Upstream LLM<br/>(OpenAI-Compatible)"]
+    Upstream["上游 LLM<br/>(OpenAI 兼容)"]
 
-    Client -->|"OpenAI Request"| Gateway
+    Client -->|"OpenAI 请求"| Gateway
     Gateway -->|"LlmRequest (IR)"| Gateway
-    Gateway -->|"OpenAI Request"| Upstream
-    Upstream -->|"OpenAI Response"| Gateway
+    Gateway -->|"OpenAI 请求"| Upstream
+    Upstream -->|"OpenAI 响应"| Gateway
     Gateway -->|"LlmResponse (IR)"| Gateway
-    Gateway -->|"OpenAI Response"| Client
+    Gateway -->|"OpenAI 响应"| Client
 ```
 
-## 3. Request Pipelines
+## 3. 请求链路
 
-### 3.1 Non-streaming
+### 3.1 非流式
 
-```mermaid
-sequenceDiagram
-    participant C as Client
-    participant RF as RequestIdFilter
-    participant AF as ApiKeyFilter
-    participant Ctrl as ChatCompletionController
-    participant Svc as ChatCompletionService
-    participant Cv1 as OpenAIToLlmConverter
-    participant R as ModelRouter
-    participant P as OpenAICompatibleProvider
-    participant U as Upstream LLM
-
-    C->>RF: POST /v1/chat/completions
-    RF->>RF: assign requestId, set MDC
-    RF->>AF: forward
-    AF->>AF: validate API Key
-    AF->>Ctrl: forward
-    Ctrl->>Svc: handle(request)
-    Svc->>Cv1: toLlmRequest()
-    Svc->>R: route(model)
-    Svc->>P: invoke(llmRequest, endpoint)
-    P->>U: HTTP POST
-    U-->>P: HTTP Response
-    P-->>Svc: LlmResponse
-    Svc->>Svc: record UsageRecord (FINAL)
-    Svc-->>Ctrl: OpenAIChatResponse
-    Ctrl-->>C: HTTP 200
+```text
+客户端
+  ↓
+RequestIdFilter（生成 requestId，写入 MDC）
+  ↓
+ApiKeyFilter（认证）
+  ↓
+ChatCompletionController
+  ↓
+ChatCompletionService.handle()
+  ↓
+RoutePlanner.plan(model)
+  ├── ModelRouter.route(model)               → List<RouteTarget>
+  ├── EndpointHealthTracker.filter(...)      → 过滤不健康候选
+  └── EndpointSelector.order(...)            → 有序候选
+  ↓
+for each candidate:
+  provider.invoke(llmRequest, endpoint)
+  ├── 成功 → 记录成功、返回
+  └── 失败 → FailureClassifier.classify()
+      ├── 可 failover → 尝试下一个
+      └── 不可 failover → 抛异常
+  ↓
+LlmResponse
+  ↓
+LlmToOpenAIConverter
+  ↓
+客户端
 ```
 
-### 3.2 Streaming
+### 3.2 流式
 
-```mermaid
-sequenceDiagram
-    participant C as Client
-    participant RF as RequestIdFilter
-    participant Ctrl as ChatCompletionController
-    participant Svc as ChatCompletionService
-    participant P as OpenAICompatibleStreamingProvider
-    participant U as Upstream LLM
-
-    C->>RF: POST /v1/chat/completions (stream=true)
-    RF->>RF: assign requestId
-    RF->>Ctrl: forward
-    Ctrl->>Svc: handleStream(request, response)
-    Svc->>P: invokeStream(llmRequest, endpoint)
-    P->>U: HTTP POST (Accept: text/event-stream)
-    U-->>P: 200 + SSE body
-    Svc->>Svc: prepare(response) — write SSE headers
-    loop for each chunk
-        Svc->>U: (read via LlmStream.next)
-        Svc->>C: writeData → flush
-    end
-    Svc->>C: writeDone ([DONE])
-    Svc->>Svc: record UsageRecord (FINAL / PARTIAL / UNKNOWN)
+```text
+客户端
+  ↓
+ChatCompletionController
+  ↓
+ChatCompletionService.handleStream()
+  ↓
+Phase 1 — Open（允许 failover）
+  for each candidate:
+    provider.invokeStream(...)
+    ├── 成功 → 获得 LlmStream，退出循环
+    └── 失败 → 分类 + 记录，尝试下一个
+  ↓
+Phase 2 — Forward（禁止 failover）
+  streamingWriter.prepare(response)   ← 响应已提交
+  while (chunk = stream.next()) != null:
+    streamingWriter.writeData(response, ...)
+  streamingWriter.writeDone(response)
 ```
 
-**关键时序**：SSE 响应头只在**上游流成功打开后**才写出。如果路由失败、认证失败或上游返回 4xx/5xx，客户端仍能看到一个干净的 HTTP 错误响应，而不是半开的 SSE 连接。
+**关键时序**：SSE 响应头只在**上游流成功打开后**才写出。路由失败、认证失败、
+上游返回 4xx/5xx 时，客户端仍能看到干净的 HTTP 错误响应。
 
-### 3.3 Client disconnect
+### 3.3 客户端断开
 
-```
-Client disconnect
+```text
+客户端断开
     ↓
-ServletOutputStream.flush() throws IOException
+ServletOutputStream.flush() 抛 IOException
     ↓
-ChatCompletionService catches IOException
+ChatCompletionService 捕获
     ↓
-LlmStream.close() — cancels upstream HTTP connection
+LlmStream.close() —— 取消上游 HTTP 连接
     ↓
 UsageRecord(settlementStatus = UNKNOWN, reason = client_disconnected)
 ```
 
 **没有这一步**，客户端断开后 MixInfer 会继续消耗上游 token 而无接收方。
 
-## 4. Module Layout
+## 4. 模块布局
 
-```
+```text
 mixinfer-gateway/
 └── src/main/java/com/mixinfer/
-    ├── config/        # 配置绑定（MixInferProperties）
-    ├── domain/        # IR：LlmRequest / LlmResponse / LlmStreamChunk / UsageRecord
-    ├── openai/        # OpenAI 兼容 DTO（请求、响应、流式、错误）
-    ├── converter/     # DTO <-> IR 转换
-    ├── provider/      # LlmProvider / StreamingLlmProvider SPI + OpenAI 实现
-    ├── streaming/     # SSE 解析与响应写入
-    ├── metering/      # 用量结算与落盘
-    ├── router/        # ModelRouter + Endpoint
-    ├── auth/          # ApiKeyFilter / ApiKeyValidator
-    ├── web/           # Servlet 层横切组件（RequestIdFilter）
-    ├── api/           # Controller
-    ├── service/       # 编排层
-    └── exception/     # 统一异常
+    ├── config/         配置绑定（MixInferProperties）
+    ├── domain/         IR：LlmRequest / LlmResponse / LlmStreamChunk / UsageRecord
+    ├── openai/         OpenAI 兼容 DTO
+    ├── converter/      DTO ↔ IR 转换
+    ├── provider/       LlmProvider / StreamingLlmProvider SPI + OpenAI 实现
+    ├── streaming/      SSE 解析与响应写入
+    ├── metering/       用量结算与落盘
+    ├── router/         路由层
+    │   ├── ModelRouter / RoutePlanner / Endpoint / RouteTarget
+    │   ├── EndpointSelector / SequentialSelector
+    │   ├── health/     EndpointHealthTracker / InMemoryEndpointHealthTracker
+    │   └── failure/    FailureType / FailureClassifier / DefaultFailureClassifier
+    ├── auth/           ApiKeyFilter / ApiKeyValidator
+    ├── web/            Servlet 层横切组件（RequestIdFilter）
+    ├── api/            Controller
+    ├── service/        编排层
+    └── exception/      统一异常
 ```
 
-## 5. Core Abstractions
+## 5. 核心抽象
 
-### 5.1 LlmRequest / LlmResponse (IR)
+### 5.1 LlmRequest / LlmResponse（IR）
 
 **IR（Internal Representation）** 是 MixInfer 的核心抽象。
 
@@ -144,7 +146,7 @@ mixinfer-gateway/
 
 ### 5.2 LlmStreamChunk（流式 IR）
 
-流式响应的每个块是**增量**，不是完整响应。因此使用独立类型：
+流式响应的每个块是**增量**，不是完整响应，因此使用独立类型：
 
 ```java
 public class LlmStreamChunk {
@@ -160,7 +162,7 @@ public class LlmStreamChunk {
 `LlmStreamChunk` 是语义级 IR，不是 OpenAI chunk 的重命名。任何 Provider
 都可以通过自己的 Stream Adapter 映射到它。
 
-### 5.3 LlmProvider / StreamingLlmProvider (SPI)
+### 5.3 LlmProvider / StreamingLlmProvider（SPI）
 
 两个独立接口：
 
@@ -176,53 +178,78 @@ public interface StreamingLlmProvider {
 }
 ```
 
-**接口分离的理由**：不支持流式的 Provider（如某些内部 RPC 协议）不必实现流式。
-服务层在收到 `stream: true` 但当前 Provider 不支持时，返回明确的错误。
+**接口分离**：不支持流式的 Provider 不必实现流式接口。
 
 ### 5.4 LlmStream（流式 IO 抽象）
 
 ```java
 public interface LlmStream extends AutoCloseable {
     LlmStreamChunk next() throws IOException;
-    @Override
-    void close();
+    @Override void close();
 }
 ```
 
 **为什么不用 `Stream<LlmStreamChunk>`**：Java `Stream<T>` 建模有限惰性集合，
-缺少资源释放、取消、IO 异常三类语义。`LlmStream` 是长生命周期、可中断的 IO 流，
-必须显式建模。
+缺少资源释放、取消、IO 异常三类语义。`LlmStream` 是长生命周期、可中断的 IO 流。
 
-### 5.5 Endpoint
+### 5.5 Provider / Endpoint / RouteTarget
 
-`Endpoint` 是"如何调用某个 Provider 的一个具体入口"的封装：
+三层概念：
 
-- Provider 名称
-- Base URL
-- API Key
-- 超时配置
+| 概念 | 含义 |
+|---|---|
+| **Provider** | 上游实例（配置里的 `name`），引用一个实现类型（`type`） |
+| **Endpoint** | 已解析的连接信息：baseUrl、apiKey、超时 |
+| **RouteTarget** | 路由条目，V0.3.0 只含 endpoint |
 
-### 5.6 ModelRouter
+**实例名与类型名分离**：`name` 用于路由引用，`type` 用于查找实现。
+多个实例可共享同一实现（如两个不同的 OpenAI 兼容上游）。
 
-V0.2 的 Router 只做一件事：
+### 5.6 路由准备：RoutePlanner
 
-> 逻辑模型名 → Endpoint
+```text
+RoutePlanner.plan(model)
+    = ModelRouter.route(model)
+    → EndpointHealthTracker.filter(candidates)
+    → EndpointSelector.order(healthy)
+```
 
-内部就是一个 `Map<String, Endpoint>` 的查询。不做负载均衡，不做 Fallback。
+**准备步骤共享，执行步骤不共享**。流式与非流式的 failover 语义差异过大，
+强行合并会让抽象充满分支。
 
-### 5.7 UsageRecorder
+### 5.7 FailureType
 
-结算记录接口。V0.2 只有一个实现 `FileUsageRecorder`，将 `UsageRecord`
+失败按**语义**分类，不按 Java 异常类型：
+
+| FailureType | 可 failover |
+|---|---|
+| CONNECTION_FAILURE / CONNECT_TIMEOUT / READ_TIMEOUT | ✅ |
+| HTTP_408 / HTTP_5XX / HTTP_429 | ✅ |
+| AUTHENTICATION_FAILURE / INVALID_REQUEST / MODEL_NOT_FOUND | ❌ |
+| UNKNOWN | ❌（保守） |
+
+### 5.8 EndpointHealthTracker
+
+内存级、实例级的顾问性组件。规则：
+
+- 连续失败 N 次标记 unhealthy
+- 任意成功重置
+- 冷却 T 秒后恢复
+- **全部 unhealthy 时仍返回全部候选**——健康状态不能导致"无端点可用"
+
+### 5.9 UsageRecorder
+
+结算记录接口。V0.3 只有 `FileUsageRecorder`，将 `UsageRecord`
 以 JSON Lines 追加写入文件。V0.4 会加入数据库实现。
 
-## 6. Usage Settlement
+## 6. 用量结算
 
 流式场景下 usage 不是必然可得的：
 
 - 某些上游不返回 usage
-- 客户端断开时，MixInfer 无法知道上游实际生成了多少 token
+- 客户端断开时无法知道上游实际生成了多少 token
 
-因此结算是一个**显式状态机**：
+因此结算是**显式状态机**：
 
 | 场景 | settlementStatus | usageSource | reason |
 |---|---|---|---|
@@ -231,10 +258,11 @@ V0.2 的 Router 只做一件事：
 | 客户端断开 | UNKNOWN | NONE | client_disconnected |
 | 上游断开（有部分 usage） | PARTIAL | PROVIDER | upstream_stream_error |
 | 上游断开（无 usage） | UNKNOWN | NONE | upstream_stream_error |
+| 全部 Endpoint 打开失败 | UNKNOWN | NONE | all_endpoints_failed |
 
-**核心原则**：客户端断开 ≠ 上游停止计费。诚实记录 `UNKNOWN`，比编造一个数字更专业。
+**核心原则**：客户端断开 ≠ 上游停止计费。诚实记录 `UNKNOWN`，比编造数字更专业。
 
-## 7. Configuration Example
+## 7. 配置示例
 
 ```yaml
 mixinfer:
@@ -243,28 +271,35 @@ mixinfer:
       name: "default"
   providers:
     - name: openai-compatible
+      type: openai-compatible
       base-url: https://api.deepseek.com
       api-key: ${DEEPSEEK_API_KEY}
-      models:
-        - deepseek-flash
+      connect-timeout-seconds: 5
+      request-timeout-seconds: 120
   routes:
     - model: deepseek-flash
-      provider: openai-compatible
+      targets:
+        - provider: openai-compatible
+  health:
+    enabled: true
+    failure-threshold: 3
+    cooldown-seconds: 30
   usage:
     file: logs/usage.log
 ```
 
-## 8. Non-Goals (V0.2)
+## 8. V0.3 不做的内容
 
-以下内容明确**不在 V0.2 范围内**：
+以下明确**不在 V0.3 范围内**：
 
+- 同 Endpoint 重试（LLM 请求不具备通用幂等性）
+- 加权随机路由
+- 主动健康探测（探测请求产生真实费用）
+- 熔断器
+- 成本 / 配额 / 限流
 - 多租户 / RBAC
-- Billing / Cost / Quota
-- 多 Provider 协议（Anthropic / Gemini 原生）
-- 负载均衡 / Fallback / Retry
-- 健康检查
-- 管理后台 Web UI
+- 控制平面 / Web 控制台
 - 多语言 SDK
 - 嵌入式模式
 
-这些会在后续版本逐步引入。见 [README Roadmap](../README.md#roadmap)。
+这些会在后续版本逐步引入。见 [README 路线图](../README.md#路线图)。
