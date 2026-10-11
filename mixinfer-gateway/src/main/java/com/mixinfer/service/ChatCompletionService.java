@@ -4,6 +4,7 @@ import com.mixinfer.converter.LlmToOpenAIConverter;
 import com.mixinfer.converter.LlmToOpenAIStreamConverter;
 import com.mixinfer.converter.OpenAIToLlmConverter;
 import com.mixinfer.domain.*;
+import com.mixinfer.exception.ClientDisconnectedException;
 import com.mixinfer.exception.ProviderException;
 import com.mixinfer.metering.UsageRecorder;
 import com.mixinfer.openai.OpenAIChatRequest;
@@ -189,7 +190,6 @@ public class ChatCompletionService {
                 StreamingLlmProvider provider = providerRegistry.getStreaming(endpoint.getProvider());
                 stream = provider.invokeStream(llmRequest, endpoint);
                 selected = endpoint;
-                healthTracker.recordSuccess(endpoint);
                 break;
 
             } catch (ProviderException e) {
@@ -251,7 +251,7 @@ public class ChatCompletionService {
                     log.info("Client disconnected while streaming, cancelling upstream");
                     settlement = UsageSettlementStatus.UNKNOWN;
                     reason = "client_disconnected";
-                    throw e;
+                    throw new ClientDisconnectedException("client disconnected", e);
                 }
             }
             streamingWriter.writeDone(response);
@@ -259,8 +259,15 @@ public class ChatCompletionService {
             settlement = lastUsage != null
                     ? UsageSettlementStatus.FINAL
                     : UsageSettlementStatus.UNKNOWN;
+            healthTracker.recordSuccess(selected);
             log.info("Stream completed model={} tokens={}",
                     model, lastUsage == null ? "n/a" : lastUsage.getTotalTokens());
+
+        } catch (ClientDisconnectedException e) {
+            // Settlement already set inside the loop; do not reclassify
+            // as an upstream failure. Endpoint health is not affected
+            // because the client abandoned the connection.
+            throw e;
 
         } catch (IOException e) {
             if (responseCommitted) {
@@ -269,6 +276,7 @@ public class ChatCompletionService {
                         ? UsageSettlementStatus.PARTIAL
                         : UsageSettlementStatus.UNKNOWN;
                 reason = "upstream_stream_error";
+                healthTracker.recordFailure(selected);
                 tryWriteErrorEvent(response, e);
             } else {
                 settlement = UsageSettlementStatus.UNKNOWN;
