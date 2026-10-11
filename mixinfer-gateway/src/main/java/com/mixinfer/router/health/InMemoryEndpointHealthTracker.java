@@ -72,8 +72,17 @@ public class InMemoryEndpointHealthTracker implements EndpointHealthTracker {
             return;
         }
         Instant now = clock.instant();
+        Duration cooldown = Duration.ofSeconds(config.getCooldownSeconds());
+
         states.compute(keyOf(endpoint), (key, state) -> {
             HealthState next = state == null ? new HealthState() : state;
+
+            // If a previous cooldown has expired, start a fresh failure window.
+            if (next.unhealthySince != null
+                    && now.isAfter(next.unhealthySince.plus(cooldown))) {
+                next = new HealthState();
+            }
+
             next.consecutiveFailures++;
             if (next.consecutiveFailures >= config.getFailureThreshold()
                     && next.unhealthySince == null) {

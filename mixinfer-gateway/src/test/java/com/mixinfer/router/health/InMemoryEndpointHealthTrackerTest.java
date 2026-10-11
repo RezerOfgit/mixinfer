@@ -150,4 +150,31 @@ class InMemoryEndpointHealthTrackerTest {
         @Override public ZoneOffset getZone() { return ZoneOffset.UTC; }
         @Override public Clock withZone(java.time.ZoneId zone) { return this; }
     }
+
+    @Test
+    void should_re_enter_unhealthy_after_cooldown_and_new_failures() {
+        MutableClock clock = new MutableClock(T0);
+        InMemoryEndpointHealthTracker tracker = buildTracker(clock);
+        Endpoint a = endpoint("a");
+        Endpoint b = endpoint("b");
+
+        // Round 1: mark a unhealthy.
+        for (int i = 0; i < 3; i++) {
+            tracker.recordFailure(a);
+        }
+        List<RouteTarget> candidates = List.of(
+                RouteTarget.builder().endpoint(a).build(),
+                RouteTarget.builder().endpoint(b).build());
+        assertThat(tracker.filter(candidates)).hasSize(1);
+
+        // Cooldown expires.
+        clock.advance(Duration.ofSeconds(31));
+        assertThat(tracker.filter(candidates)).hasSize(2);
+
+        // Round 2: fail again. Should re-enter unhealthy.
+        tracker.recordFailure(a);
+        tracker.recordFailure(a);
+        tracker.recordFailure(a);
+        assertThat(tracker.filter(candidates)).hasSize(1);
+    }
 }
