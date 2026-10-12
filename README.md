@@ -4,11 +4,11 @@
 
 ## 状态
 
-✅ **V0.3 已发布** — 多 Endpoint 路由与故障转移。
+✅ **V0.3 已发布** — Gateway Core & Reliability。
 
-- V0.1：语义 IR 与 OpenAI 兼容网关
-- V0.2：SSE 流式、上游取消、用量结算、requestId 贯穿
-- V0.3：多 Endpoint 路由、跨 Endpoint Failover、健康追踪、per-endpoint 超时
+- V0.1：语义 IR 与最小网关闭环
+- V0.2：流式数据平面与用量结算基础
+- V0.3：多 Endpoint 路由、Failover、被动健康追踪
 
 下一阶段：V0.4 用量与治理。
 
@@ -22,22 +22,16 @@ MixInfer 在协议之间保留**协议无关的内部表示（IR）**。入站�
 
 ## 路线图
 
-- [x] **V0.1** 语义 IR 与 OpenAI 兼容网关
-- [x] **V0.2** 流式数据平面
-  - [x] 端到端 SSE 流式
-  - [x] 客户端断开时取消上游
-  - [x] 用量结算状态机
-  - [x] requestId 贯穿
-- [x] **V0.3** 多 Endpoint 路由与可靠性
-  - [x] 一个逻辑模型对应多个上游
-  - [x] 声明顺序 Failover
-  - [x] 失败类型分类（可 failover / 不可 failover）
-  - [x] 流式 open 阶段 Failover
-  - [x] 内存级 Endpoint 健康追踪
-  - [x] per-endpoint 超时（connect / request）
-- [ ] **V0.4** 用量与治理 — 成本、配额、限流
-- [ ] **V0.5** 控制平面 — Web 控制台，Provider / Endpoint / Key 管理
-- [ ] **长期** SDK、嵌入模式、多协议入站
+- [x] **V0.1** Technical MVP — 语义 IR 与最小网关闭环
+- [x] **V0.2** Streaming Foundation — 流式数据平面与用量结算基础
+- [x] **V0.3** Gateway Core & Reliability — 多 Endpoint 路由与故障转移
+- [ ] **V0.4** Usage & Governance — 用量持久化、查询、成本、限流、额度
+- [ ] **V0.5** Control Plane Foundation — 管理入口、配置管理、极简 Console
+- [ ] **V0.6** Enterprise Foundation — Tenant、RBAC、租户隔离
+- [ ] **V0.7** Extensibility — 自定义协议、Formatter、SDK
+- [ ] **V1.0** Stable Release — 完整可部署、可复用
+
+> V0.5 及之后的版本细节会在 V0.4 完成后重新评估，此处仅作方向标记。
 
 ## 架构
 

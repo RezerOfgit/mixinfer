@@ -380,6 +380,16 @@ with a timer, which adds complexity not justified by V0.3's scope.
   - 重试与 Fallback 是两个独立的可靠性维度，V0.3 只做 Fallback
   - 减少概念数量，降低配置负担
 
+**关于未来的 Retry 设计**：V0.3 排除的是"通用自动重试"，不是"永久不做 Retry"。
+未来的 Retry 应按下述场景分层：
+
+| 场景 | 是否可重试 |
+|---|---|
+| 连接建立前失败（可证明请求未发出） | 可评估 |
+| 请求已发送、结果未知 | 默认不重放 |
+| 流式输出已经开始 | 不切换上游 |
+| 有明确幂等保障的请求 | 单独设计 |
+
 ### Alternative 4: 使用 Circuit Breaker（熔断器）
 
 - **优点**：成熟的可靠性模式；状态机明确
