@@ -232,6 +232,7 @@ public class SqliteUsageRepository implements UsageRepository {
         sql.append(", COALESCE(SUM(COALESCE(input_tokens, 0)), 0) AS input_tokens");
         sql.append(", COALESCE(SUM(COALESCE(output_tokens, 0)), 0) AS output_tokens");
         sql.append(", COALESCE(SUM(COALESCE(cost_microcents, 0)), 0) AS cost_microcents");
+        sql.append(", SUM(CASE WHEN cost_microcents IS NULL THEN 1 ELSE 0 END) AS unpriced_count");
         sql.append(" FROM usage_records WHERE 1=1");
 
         List<Object> args = new ArrayList<>();
@@ -277,6 +278,7 @@ public class SqliteUsageRepository implements UsageRepository {
                         .inputTokens(rs.getLong("input_tokens"))
                         .outputTokens(rs.getLong("output_tokens"))
                         .costMicrocents(rs.getLong("cost_microcents"))
+                        .unpricedCount(rs.getLong("unpriced_count"))
                         .build(),
                 args.toArray());
     }
