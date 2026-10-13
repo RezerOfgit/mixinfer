@@ -1,5 +1,7 @@
 package com.mixinfer;
 
+import com.mixinfer.domain.UsageRecord;
+import com.mixinfer.metering.UsageRepository;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
 import org.junit.jupiter.api.AfterAll;
@@ -34,6 +36,9 @@ class RateLimitIntegrationTest {
     @Autowired
     TestRestTemplate restTemplate;
 
+    @Autowired
+    UsageRepository usageRepository;
+
     @DynamicPropertySource
     static void overrideProperties(DynamicPropertyRegistry registry) throws IOException {
         upstream = new MockWebServer();
@@ -63,7 +68,7 @@ class RateLimitIntegrationTest {
 
     @Test
     void should_reject_after_exceeding_rate_limit_with_retry_after() {
-        // Enqueue three responses; only first two are expected to consume.
+        // Enqueue two responses; only the first two requests should reach upstream.
         for (int i = 0; i < 2; i++) {
             upstream.enqueue(new MockResponse()
                     .setResponseCode(200)
@@ -92,15 +97,24 @@ class RateLimitIntegrationTest {
             assertThat(r.getStatusCode()).isEqualTo(HttpStatus.OK);
         }
 
-        // Third: rejected
-        ResponseEntity<String> r = restTemplate.postForEntity(
+        // Third: rejected by rate limiter
+        ResponseEntity<String> rejected = restTemplate.postForEntity(
                 "http://localhost:" + port + "/v1/chat/completions",
                 new HttpEntity<>(body, headers), String.class);
 
-        assertThat(r.getStatusCode()).isEqualTo(HttpStatus.TOO_MANY_REQUESTS);
-        assertThat(r.getBody()).contains("rate_limited");
-        assertThat(r.getHeaders().getFirst("Retry-After")).isNotNull();
-        assertThat(Long.parseLong(r.getHeaders().getFirst("Retry-After")))
+        // 1. Rejection response assertions
+        assertThat(rejected.getStatusCode()).isEqualTo(HttpStatus.TOO_MANY_REQUESTS);
+        assertThat(rejected.getBody()).contains("rate_limited");
+        assertThat(rejected.getHeaders().getFirst("Retry-After")).isNotNull();
+        assertThat(Long.parseLong(rejected.getHeaders().getFirst("Retry-After")))
                 .isGreaterThan(0);
+
+        // 2. Rejection is persisted as an unsuccessful usage record
+        String requestId = rejected.getHeaders().getFirst("X-MixInfer-Request-Id");
+        UsageRecord record = usageRepository.findByRequestId(requestId).orElseThrow();
+        assertThat(record.isSuccess()).isFalse();
+        assertThat(record.getReason()).isEqualTo("rate_limited");
+        assertThat(record.getCostMicrocents()).isNull();
+        assertThat(record.getAttemptCount()).isZero();
     }
 }

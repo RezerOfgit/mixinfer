@@ -312,4 +312,26 @@ class SqliteUsageRepositoryTest {
                 .attemptCount(1)
                 .build();
     }
+
+    @Test
+    void should_count_unpriced_requests_in_aggregate() {
+        repo.save(costRecord("r1", 10, 20, 100L));
+        repo.save(costRecord("r2", 5, 5, 50L));
+        repo.save(noCostRecord("r3"));
+        repo.save(noCostRecord("r4"));
+
+        var query = com.mixinfer.metering.AggregateQuery.builder()
+                .from(Instant.parse("2020-01-01T00:00:00Z"))
+                .to(Instant.parse("2030-01-01T00:00:00Z"))
+                .groupBy(com.mixinfer.metering.AggregateQuery.GROUP_BY_MODEL)
+                .build();
+
+        var rows = repo.aggregate(query);
+
+        assertThat(rows).hasSize(1);
+        var row = rows.get(0);
+        assertThat(row.getRequestCount()).isEqualTo(4);
+        assertThat(row.getCostMicrocents()).isEqualTo(150L);   // only priced records
+        assertThat(row.getUnpricedCount()).isEqualTo(2);
+    }
 }
