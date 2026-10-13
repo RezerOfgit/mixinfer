@@ -21,6 +21,9 @@ mixinfer:
         - provider: openai-compatible
   usage:
     file: ${MIXINFER_USAGE_FILE:logs/usage.log}
+  storage:
+    sqlite:
+      path: ${MIXINFER_SQLITE_PATH:logs/mixinfer.db}
 
   # To exercise failover locally, add a second (unreachable) provider
   # and a second route target:
