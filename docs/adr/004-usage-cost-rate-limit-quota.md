@@ -256,16 +256,18 @@ costMicrocents = round(
 
 **未知用量的语义**：
 
-| 场景 | `costMicrocents` |
-|---|---|
-| 上游返回完整 usage 且有定价 | 计算值 |
-| 上游返回部分 usage 且有定价 | 基于已知部分计算 |
-| 上游未返回 usage | `null` |
-| 该 (endpoint, upstreamModel) 无定价配置 | `null` + `reason` 标注 `pricing_missing` |
+| 场景 | `costMicrocents` | `pricingVersion` | `reason` |
+|---|---|---|---|
+| 上游返回完整 usage 且有定价 | 计算值 | 定价版本号 | — |
+| 上游返回部分 usage 且有定价 | 基于已知部分计算 | 定价版本号 | — |
+| 上游未返回 usage | `null` | 定价版本号 | — |
+| 该 (endpoint, upstreamModel) 无定价配置 | `null` | `null` | 不覆盖 |
 
 **关键原则**：**未知成本绝不记 0** —— 否则聚合报表会低估成本。
 
 **语义说明**：`costMicrocents` 是**按配置单价估算的成本**，**不是供应商实际账单金额**。供应商可能有缓存折扣、阶梯价或其他调整。字段名或文档中需明确。
+
+**pricing 缺失不写入 `reason`** —— `reason` 仅用于表达"结算不完整或失败"的原因。使用方可由 `success = true && costMicrocents = null` 组合识别"成功但无定价信息"的情况。
 
 ---
 
