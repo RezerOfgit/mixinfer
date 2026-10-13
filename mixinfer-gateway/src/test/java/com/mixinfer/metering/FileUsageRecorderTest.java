@@ -5,6 +5,7 @@ import com.mixinfer.domain.LlmUsage;
 import com.mixinfer.domain.UsageRecord;
 import com.mixinfer.domain.UsageSettlementStatus;
 import com.mixinfer.domain.UsageSource;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -15,6 +16,7 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+@Disabled("Superseded by SqliteUsageRepositoryTest in V0.4")
 class FileUsageRecorderTest {
 
     @Test

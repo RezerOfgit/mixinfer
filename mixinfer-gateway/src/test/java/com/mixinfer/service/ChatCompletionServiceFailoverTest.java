@@ -177,7 +177,8 @@ class ChatCompletionServiceFailoverTest {
                 new StreamingResponseWriter(om),
                 r -> {},
                 health,
-                new DefaultFailureClassifier());
+                new DefaultFailureClassifier(),
+                om);
     }
 
     private ChatCompletionService buildStreamingService(StreamingLlmProvider provider) {
@@ -221,7 +222,8 @@ class ChatCompletionServiceFailoverTest {
                 new StreamingResponseWriter(om),
                 r -> {},
                 ChatCompletionServiceTestFixtures.noopHealth(),
-                new DefaultFailureClassifier());
+                new DefaultFailureClassifier(),
+                om);
     }
 
     @Test

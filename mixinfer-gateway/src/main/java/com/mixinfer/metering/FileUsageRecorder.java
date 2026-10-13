@@ -2,12 +2,10 @@ package com.mixinfer.metering;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mixinfer.domain.UsageRecord;
+import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Component;
-
-import jakarta.annotation.PreDestroy;
 
 import java.io.BufferedWriter;
 import java.io.IOException;
@@ -20,10 +18,12 @@ import java.nio.file.StandardOpenOption;
 /**
  * Appends usage records to a JSON Lines file.
  *
- * <p>Each line is one JSON object. Failures are logged but never propagate:
- * settlement must not break the request path.
+ * @deprecated Since V0.4 usage is persisted to SQLite via
+ *             {@link RepositoryUsageRecorder}. This class is kept for
+ *             reference and for reading historical {@code usage.log}
+ *             files; it is no longer registered as a Spring bean.
  */
-@Component
+@Deprecated
 public class FileUsageRecorder implements UsageRecorder {
 
     private static final Logger log = LoggerFactory.getLogger(FileUsageRecorder.class);

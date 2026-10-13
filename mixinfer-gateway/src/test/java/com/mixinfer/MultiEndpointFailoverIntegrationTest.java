@@ -59,8 +59,9 @@ class MultiEndpointFailoverIntegrationTest {
         registry.add("mixinfer.routes[0].targets[0].provider", () -> "primary");
         registry.add("mixinfer.routes[0].targets[1].provider", () -> "backup");
 
-        registry.add("mixinfer.usage.file",
-                () -> System.getProperty("java.io.tmpdir") + "/mixinfer-failover-usage.log");
+        registry.add("mixinfer.storage.sqlite.path",
+                () -> System.getProperty("java.io.tmpdir") + "/mixinfer-test-"
+                        + java.util.UUID.randomUUID() + ".db");
     }
 
     @AfterAll

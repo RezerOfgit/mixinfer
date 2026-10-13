@@ -29,6 +29,7 @@ class SequentialSelectorTest {
     private RouteTarget target(String provider) {
         return RouteTarget.builder()
                 .endpoint(Endpoint.builder()
+                        .id(provider)
                         .provider(provider)
                         .baseUrl("http://" + provider)
                         .apiKey("k")

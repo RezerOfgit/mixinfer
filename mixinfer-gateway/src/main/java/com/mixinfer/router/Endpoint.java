@@ -6,34 +6,27 @@ import lombok.Value;
 import java.time.Duration;
 
 /**
- * A resolved endpoint: a provider plus the connection details
- * needed to invoke it, including per-endpoint timeouts.
+ * A resolved endpoint: a provider plus the connection details needed
+ * to invoke it, including per-endpoint timeouts.
+ *
+ * <p>{@code id} is a stable identifier used in usage records. In V0.4
+ * it is derived from the provider name at configuration load time.
+ * Future versions may introduce a distinct endpoint identity when a
+ * single provider can expose multiple endpoints.
  */
 @Value
 @Builder
 public class Endpoint {
 
+    /** Stable identifier for usage attribution. */
+    String id;
+
+    /** Logical provider name. */
     String provider;
+
     String baseUrl;
     String apiKey;
 
-    /** Connect timeout. Used by both streaming and non-streaming clients. */
     Duration connectTimeout;
-
-    /**
-     * Request timeout.
-     *
-     * <p>For non-streaming calls: total time from sending the request
-     * to receiving the full response body.
-     *
-     * <p>For streaming calls: covers only the time until upstream
-     * response headers arrive. It does NOT bound the total stream
-     * lifetime; JDK {@code HttpRequest.timeout()} stops applying once
-     * the body stream is handed to the caller. A stream-lifetime
-     * timeout is deferred to V0.3.1.
-     */
     Duration requestTimeout;
-
-    /** Idle timeout. Used by streaming clients only. */
-//    Duration idleTimeout;
 }

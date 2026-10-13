@@ -75,12 +75,12 @@ public class ModelRouter {
         }
 
         Endpoint endpoint = Endpoint.builder()
+                .id(provider.getName())
                 .provider(provider.getName())
                 .baseUrl(provider.getBaseUrl())
                 .apiKey(provider.getApiKey())
                 .connectTimeout(Duration.ofSeconds(provider.getConnectTimeoutSeconds()))
                 .requestTimeout(Duration.ofSeconds(provider.getRequestTimeoutSeconds()))
-//                .idleTimeout(Duration.ofSeconds(provider.getIdleTimeoutSeconds()))
                 .build();
 
         return RouteTarget.builder().endpoint(endpoint).build();

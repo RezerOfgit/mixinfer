@@ -245,7 +245,8 @@ class ChatCompletionServiceStreamingLifecycleTest {
                 new StreamingResponseWriter(om),
                 recorder,
                 health,
-                new DefaultFailureClassifier());
+                new DefaultFailureClassifier(),
+                om);
     }
 
     // ===================== 辅助类 =====================

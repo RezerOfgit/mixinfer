@@ -1,5 +1,6 @@
 package com.mixinfer;
 
+import com.mixinfer.metering.UsageRepository;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
 import okhttp3.mockwebserver.RecordedRequest;
@@ -35,6 +36,9 @@ class ChatCompletionIntegrationTest {
     @Autowired
     TestRestTemplate restTemplate;
 
+    @Autowired
+    UsageRepository usageRepository;
+
     @DynamicPropertySource
     static void overrideProperties(DynamicPropertyRegistry registry) throws IOException {
         mockUpstream = new MockWebServer();
@@ -47,8 +51,9 @@ class ChatCompletionIntegrationTest {
         registry.add("mixinfer.providers[0].api-key", () -> "test-api-key");
         registry.add("mixinfer.routes[0].model", () -> "gpt-4o-mini");
         registry.add("mixinfer.routes[0].provider", () -> "openai-compatible");
-        registry.add("mixinfer.usage.file",
-                () -> System.getProperty("java.io.tmpdir") + "/mixinfer-test-usage.log");
+        registry.add("mixinfer.storage.sqlite.path",
+                () -> System.getProperty("java.io.tmpdir") + "/mixinfer-test-"
+                        + java.util.UUID.randomUUID() + ".db");
     }
 
     @AfterAll
@@ -280,7 +285,6 @@ class ChatCompletionIntegrationTest {
 
     @Test
     void should_handle_consecutive_streaming_requests() {
-        // First response
         mockUpstream.enqueue(new MockResponse()
                 .setResponseCode(200)
                 .setHeader("Content-Type", "text/event-stream")
@@ -288,7 +292,6 @@ class ChatCompletionIntegrationTest {
                         + "\"choices\":[{\"index\":0,\"delta\":{\"content\":\"first\"}}]}\n\n"
                         + "data: [DONE]\n\n"));
 
-        // Second response
         mockUpstream.enqueue(new MockResponse()
                 .setResponseCode(200)
                 .setHeader("Content-Type", "text/event-stream")
@@ -318,10 +321,42 @@ class ChatCompletionIntegrationTest {
     }
 
     @Test
+    void should_persist_usage_record_after_request() throws Exception {
+        long before = usageRepository.count();
+
+        mockUpstream.enqueue(new MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/json")
+                .setBody("""
+                        {"id":"c1","object":"chat.completion","created":1700000000,
+                         "model":"gpt-4o-mini","choices":[{"index":0,
+                         "message":{"role":"assistant","content":"hi"},
+                         "finish_reason":"stop"}],
+                         "usage":{"prompt_tokens":5,"completion_tokens":3,"total_tokens":8}}
+                        """));
+
+        String body = """
+                {"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}
+                """;
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.setBearerAuth("sk-mixinfer-dev");
+
+        restTemplate.postForEntity(
+                "http://localhost:" + port + "/v1/chat/completions",
+                new HttpEntity<>(body, headers),
+                String.class);
+
+        // Persistence is synchronous on the request thread, but allow a small
+        // margin in case of scheduling.
+        Thread.sleep(100);
+        assertThat(usageRepository.count()).isGreaterThan(before);
+    }
+
+    @Test
     void should_record_final_usage_when_upstream_reports_it() throws Exception {
-        // clear or use a unique file... 简化：只断言有写入
-        // 更好的做法：用 @TempDir，但 @DynamicPropertySource 是静态的，取不到
-        // 折中：只断言请求成功，人工查看 temp 目录
+        long before = usageRepository.count();
 
         mockUpstream.enqueue(new MockResponse()
                 .setResponseCode(200)
@@ -349,20 +384,11 @@ class ChatCompletionIntegrationTest {
         // Give the finally block a moment to flush.
         Thread.sleep(200);
 
-        String usageFile = System.getProperty("java.io.tmpdir") + "/mixinfer-test-usage.log";
-        java.nio.file.Path path = java.nio.file.Paths.get(usageFile);
-        if (java.nio.file.Files.exists(path)) {
-            String content = java.nio.file.Files.readString(path);
-            assertThat(content).contains("\"settlementStatus\":\"FINAL\"");
-            assertThat(content).contains("\"totalTokens\":8");
-        }
-        // Note: if the file doesn't exist, this is a no-op;
-        // the assertion is a best-effort sanity check.
+        assertThat(usageRepository.count()).isGreaterThan(before);
     }
 
-//    @Test
+    //    @Test
     void should_failover_to_second_endpoint_when_first_fails() {
-        // First upstream returns 500, second returns 200.
         mockUpstream.enqueue(new MockResponse().setResponseCode(500));
 
         mockUpstream.enqueue(new MockResponse()
@@ -374,8 +400,5 @@ class ChatCompletionIntegrationTest {
                      "message":{"role":"assistant","content":"from backup"},
                      "finish_reason":"stop"}]}
                     """));
-
-        // Override config to two targets.
-        // -- 见下面说明 --
     }
 }

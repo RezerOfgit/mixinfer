@@ -129,6 +129,7 @@ class InMemoryEndpointHealthTrackerTest {
 
     private Endpoint endpoint(String provider) {
         return Endpoint.builder()
+                .id(provider)
                 .provider(provider)
                 .baseUrl("http://" + provider)
                 .apiKey("k")
