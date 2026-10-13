@@ -165,10 +165,13 @@ public class MixInferProperties {
      *
      * <p>Prices are expressed in microcents (1 cent = 1,000,000 microcents),
      * per one million tokens, to avoid floating-point arithmetic.
+     * {@code version} must be a stable, reproducible identifier so that
+     * historical usage can be traced to a specific price table.
      */
     @Data
     public static class PricingConfig {
         private String upstreamModel;
+        private String version = "unversioned";
         private long inputPricePerMillionMicrocents;
         private long outputPricePerMillionMicrocents;
     }

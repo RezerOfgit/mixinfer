@@ -8,6 +8,7 @@ import com.mixinfer.converter.OpenAIToLlmConverter;
 import com.mixinfer.domain.LlmRequest;
 import com.mixinfer.domain.LlmResponse;
 import com.mixinfer.exception.ProviderException;
+import com.mixinfer.metering.CostCalculator;
 import com.mixinfer.openai.OpenAIChatRequest;
 import com.mixinfer.openai.OpenAIMessage;
 import com.mixinfer.provider.LlmProvider;
@@ -25,6 +26,7 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -178,7 +180,8 @@ class ChatCompletionServiceFailoverTest {
                 r -> {},
                 health,
                 new DefaultFailureClassifier(),
-                om);
+                om,
+                new CostCalculator());
     }
 
     private ChatCompletionService buildStreamingService(StreamingLlmProvider provider) {
@@ -223,7 +226,8 @@ class ChatCompletionServiceFailoverTest {
                 r -> {},
                 ChatCompletionServiceTestFixtures.noopHealth(),
                 new DefaultFailureClassifier(),
-                om);
+                om,
+                new CostCalculator());
     }
 
     @Test
@@ -262,6 +266,7 @@ class ChatCompletionServiceFailoverTest {
                 .apiKey("k")
                 .connectTimeout(Duration.ofSeconds(5))
                 .requestTimeout(Duration.ofSeconds(30))
+                .pricing(Map.of())
                 .build();
 
         List<RouteTarget> candidates = List.of(

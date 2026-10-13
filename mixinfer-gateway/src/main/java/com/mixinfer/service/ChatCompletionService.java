@@ -9,6 +9,8 @@ import com.mixinfer.domain.*;
 import com.mixinfer.exception.ClientDisconnectedException;
 import com.mixinfer.exception.ProviderException;
 import com.mixinfer.metering.AttemptLog;
+import com.mixinfer.metering.CostCalculator;
+import com.mixinfer.metering.CostResult;
 import com.mixinfer.metering.UsageRecorder;
 import com.mixinfer.openai.OpenAIChatRequest;
 import com.mixinfer.openai.OpenAIChatResponse;
@@ -17,6 +19,7 @@ import com.mixinfer.provider.LlmStream;
 import com.mixinfer.provider.ProviderRegistry;
 import com.mixinfer.provider.StreamingLlmProvider;
 import com.mixinfer.router.Endpoint;
+import com.mixinfer.router.Pricing;
 import com.mixinfer.router.RoutePlanner;
 import com.mixinfer.router.RouteTarget;
 import com.mixinfer.router.failure.FailureClassifier;
@@ -53,6 +56,7 @@ public class ChatCompletionService {
     private final EndpointHealthTracker healthTracker;
     private final FailureClassifier failureClassifier;
     private final ObjectMapper objectMapper;
+    private final CostCalculator costCalculator;
 
     public ChatCompletionService(OpenAIToLlmConverter inboundConverter,
                                  LlmToOpenAIConverter outboundConverter,
@@ -63,7 +67,8 @@ public class ChatCompletionService {
                                  UsageRecorder usageRecorder,
                                  EndpointHealthTracker healthTracker,
                                  FailureClassifier failureClassifier,
-                                 ObjectMapper objectMapper) {
+                                 ObjectMapper objectMapper,
+                                 CostCalculator costCalculator) {
         this.inboundConverter = inboundConverter;
         this.outboundConverter = outboundConverter;
         this.streamConverter = streamConverter;
@@ -74,6 +79,7 @@ public class ChatCompletionService {
         this.healthTracker = healthTracker;
         this.failureClassifier = failureClassifier;
         this.objectMapper = objectMapper;
+        this.costCalculator = costCalculator;
     }
 
     public OpenAIChatResponse handle(OpenAIChatRequest request) {
@@ -104,10 +110,13 @@ public class ChatCompletionService {
                 healthTracker.recordSuccess(endpoint);
                 attempts.recordSuccess(endpoint.getProvider(), endpoint.getId());
 
-                log.info("Upstream responded model={} upstreamModel={} tokens={}",
+                CostResult cost = computeCost(endpoint, llmResponse);
+
+                log.info("Upstream responded model={} upstreamModel={} tokens={} costMicrocents={}",
                         model, llmResponse.getModel(),
                         llmResponse.getUsage() == null
-                                ? "n/a" : llmResponse.getUsage().getTotalTokens());
+                                ? "n/a" : llmResponse.getUsage().getTotalTokens(),
+                        cost == null ? "n/a" : cost.microcents());
 
                 usageRecorder.record(UsageRecord.builder()
                         .requestId(requestId)
@@ -119,6 +128,8 @@ public class ChatCompletionService {
                         .startedAt(startedAt)
                         .completedAt(Instant.now())
                         .providerReported(llmResponse.getUsage())
+                        .costMicrocents(cost == null ? null : cost.microcents())
+                        .pricingVersion(cost == null ? null : cost.pricingVersion())
                         .settlementStatus(UsageSettlementStatus.FINAL)
                         .usageSource(llmResponse.getUsage() != null
                                 ? UsageSource.PROVIDER : UsageSource.NONE)
@@ -327,6 +338,8 @@ public class ChatCompletionService {
         } finally {
             stream.close();
             try {
+                CostResult cost = computeCost(selected, upstreamModel, lastUsage);
+
                 usageRecorder.record(UsageRecord.builder()
                         .requestId(requestId)
                         .virtualKeyId(virtualKeyId)
@@ -337,6 +350,8 @@ public class ChatCompletionService {
                         .startedAt(startedAt)
                         .completedAt(Instant.now())
                         .providerReported(lastUsage)
+                        .costMicrocents(cost == null ? null : cost.microcents())
+                        .pricingVersion(cost == null ? null : cost.pricingVersion())
                         .settlementStatus(settlement)
                         .usageSource(lastUsage != null ? UsageSource.PROVIDER : UsageSource.NONE)
                         .reason(reason)
@@ -357,5 +372,23 @@ public class ChatCompletionService {
             // Client is already gone; nothing more to do.
             log.debug("Failed to write error event to client: {}", writeFailure.getMessage());
         }
+    }
+
+    /** Computes cost from a non-streaming response. */
+    private CostResult computeCost(Endpoint endpoint, LlmResponse response) {
+        if (endpoint.getPricing() == null || response.getModel() == null) {
+            return null;
+        }
+        Pricing pricing = endpoint.getPricing().get(response.getModel());
+        return costCalculator.calculate(response.getUsage(), pricing);
+    }
+
+    /** Computes cost from a streaming response. */
+    private CostResult computeCost(Endpoint endpoint, String upstreamModel, LlmUsage usage) {
+        if (endpoint.getPricing() == null || upstreamModel == null) {
+            return null;
+        }
+        Pricing pricing = endpoint.getPricing().get(upstreamModel);
+        return costCalculator.calculate(usage, pricing);
     }
 }

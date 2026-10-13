@@ -117,4 +117,39 @@ class ModelRouterTest {
 
         return properties;
     }
+
+    @Test
+    void should_carry_pricing_to_endpoint() {
+        MixInferProperties properties = new MixInferProperties();
+
+        MixInferProperties.ProviderConfig provider = new MixInferProperties.ProviderConfig();
+        provider.setName("deepseek");
+        provider.setBaseUrl("https://api.deepseek.com");
+        provider.setApiKey("k");
+
+        MixInferProperties.PricingConfig pricing = new MixInferProperties.PricingConfig();
+        pricing.setUpstreamModel("deepseek-chat");
+        pricing.setVersion("2026-10-13-1");
+        pricing.setInputPricePerMillionMicrocents(140_000L);
+        pricing.setOutputPricePerMillionMicrocents(280_000L);
+        provider.setPricing(java.util.List.of(pricing));
+
+        properties.setProviders(java.util.List.of(provider));
+
+        MixInferProperties.TargetConfig target = new MixInferProperties.TargetConfig();
+        target.setProvider("deepseek");
+        MixInferProperties.RouteConfig route = new MixInferProperties.RouteConfig();
+        route.setModel("deepseek-flash");
+        route.setTargets(java.util.List.of(target));
+        properties.setRoutes(java.util.List.of(route));
+
+        ModelRouter router = new ModelRouter(properties);
+        Endpoint endpoint = router.route("deepseek-flash").get(0).getEndpoint();
+
+        assertThat(endpoint.getPricing()).containsKey("deepseek-chat");
+        assertThat(endpoint.getPricing().get("deepseek-chat").version())
+                .isEqualTo("2026-10-13-1");
+        assertThat(endpoint.getPricing().get("deepseek-chat").inputPricePerMillionMicrocents())
+                .isEqualTo(140_000L);
+    }
 }

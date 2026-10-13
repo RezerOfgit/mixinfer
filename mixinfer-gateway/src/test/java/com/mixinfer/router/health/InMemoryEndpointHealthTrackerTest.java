@@ -10,6 +10,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -135,6 +136,7 @@ class InMemoryEndpointHealthTrackerTest {
                 .apiKey("k")
                 .connectTimeout(Duration.ofSeconds(5))
                 .requestTimeout(Duration.ofSeconds(30))
+                .pricing(Map.of())
                 .build();
     }
 

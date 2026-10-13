@@ -9,6 +9,7 @@ import com.mixinfer.domain.ContentPart;
 import com.mixinfer.domain.LlmRequest;
 import com.mixinfer.domain.LlmStreamChunk;
 import com.mixinfer.domain.UsageRecord;
+import com.mixinfer.metering.CostCalculator;
 import com.mixinfer.metering.UsageRecorder;
 import com.mixinfer.openai.OpenAIChatRequest;
 import com.mixinfer.openai.OpenAIMessage;
@@ -246,7 +247,8 @@ class ChatCompletionServiceStreamingLifecycleTest {
                 recorder,
                 health,
                 new DefaultFailureClassifier(),
-                om);
+                om,
+                new CostCalculator());
     }
 
     // ===================== 辅助类 =====================

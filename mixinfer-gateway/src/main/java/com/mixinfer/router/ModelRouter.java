@@ -74,6 +74,15 @@ public class ModelRouter {
                     "Route '" + model + "' references unknown provider: " + target.getProvider());
         }
 
+        Map<String, Pricing> pricing = provider.getPricing().stream()
+                .collect(Collectors.toUnmodifiableMap(
+                        MixInferProperties.PricingConfig::getUpstreamModel,
+                        p -> new Pricing(
+                                p.getInputPricePerMillionMicrocents(),
+                                p.getOutputPricePerMillionMicrocents(),
+                                p.getVersion()),
+                        (a, b) -> a));   // duplicates: keep the first
+
         Endpoint endpoint = Endpoint.builder()
                 .id(provider.getName())
                 .provider(provider.getName())
@@ -81,6 +90,7 @@ public class ModelRouter {
                 .apiKey(provider.getApiKey())
                 .connectTimeout(Duration.ofSeconds(provider.getConnectTimeoutSeconds()))
                 .requestTimeout(Duration.ofSeconds(provider.getRequestTimeoutSeconds()))
+                .pricing(pricing)
                 .build();
 
         return RouteTarget.builder().endpoint(endpoint).build();
