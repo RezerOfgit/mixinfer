@@ -244,4 +244,72 @@ class SqliteUsageRepositoryTest {
                 .attemptCount(1)
                 .build();
     }
+
+    @Test
+    void should_sum_cost_in_aggregate() {
+        repo.save(costRecord("r1", 10, 20, 100L));
+        repo.save(costRecord("r2", 5, 5, 50L));
+        repo.save(costRecord("r3", 1, 1, 10L));
+
+        var query = com.mixinfer.metering.AggregateQuery.builder()
+                .from(Instant.parse("2020-01-01T00:00:00Z"))
+                .to(Instant.parse("2030-01-01T00:00:00Z"))
+                .groupBy(com.mixinfer.metering.AggregateQuery.GROUP_BY_MODEL)
+                .build();
+
+        var rows = repo.aggregate(query);
+
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).getCostMicrocents()).isEqualTo(160L);
+    }
+
+    @Test
+    void should_exclude_null_cost_from_sum() {
+        repo.save(costRecord("r1", 10, 20, 100L));
+        repo.save(noCostRecord("r2"));
+
+        var query = com.mixinfer.metering.AggregateQuery.builder()
+                .from(Instant.parse("2020-01-01T00:00:00Z"))
+                .to(Instant.parse("2030-01-01T00:00:00Z"))
+                .groupBy(com.mixinfer.metering.AggregateQuery.GROUP_BY_MODEL)
+                .build();
+
+        var rows = repo.aggregate(query);
+
+        // COALESCE(cost, 0) -> null contributes 0 to sum.
+        assertThat(rows.get(0).getCostMicrocents()).isEqualTo(100L);
+        // But request count includes both records.
+        assertThat(rows.get(0).getRequestCount()).isEqualTo(2);
+    }
+
+    private UsageRecord costRecord(String id, int in, int out, long cost) {
+        return UsageRecord.builder()
+                .requestId(id)
+                .model("gpt-4o-mini")
+                .provider("p")
+                .providerReported(com.mixinfer.domain.LlmUsage.builder()
+                        .promptTokens(in).completionTokens(out).totalTokens(in + out).build())
+                .costMicrocents(cost)
+                .startedAt(Instant.parse("2026-10-13T00:00:00Z"))
+                .completedAt(Instant.parse("2026-10-13T00:00:01Z"))
+                .settlementStatus(UsageSettlementStatus.FINAL)
+                .usageSource(UsageSource.PROVIDER)
+                .success(true)
+                .attemptCount(1)
+                .build();
+    }
+
+    private UsageRecord noCostRecord(String id) {
+        return UsageRecord.builder()
+                .requestId(id)
+                .model("gpt-4o-mini")
+                .provider("p")
+                .startedAt(Instant.parse("2026-10-13T00:00:00Z"))
+                .completedAt(Instant.parse("2026-10-13T00:00:01Z"))
+                .settlementStatus(UsageSettlementStatus.UNKNOWN)
+                .usageSource(UsageSource.NONE)
+                .success(false)
+                .attemptCount(1)
+                .build();
+    }
 }
