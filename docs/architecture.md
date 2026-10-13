@@ -239,8 +239,9 @@ RoutePlanner.plan(model)
 
 ### 5.9 UsageRecorder
 
-结算记录接口。V0.3 只有 `FileUsageRecorder`，将 `UsageRecord`
-以 JSON Lines 追加写入文件。V0.4 会加入数据库实现。
+结算记录接口。V0.4 之前的 `FileUsageRecorder`（JSON Lines 文件实现）已
+由 SQLite 实现替代，历史文件仍可通过 jq / awk 查询。V0.4 起由
+`RepositoryUsageRecorder` 落库。
 
 ## 6. 用量结算
 
