@@ -18,6 +18,9 @@ public class MixInferProperties {
     /** Client-facing API keys used to authenticate requests to MixInfer. */
     private List<ApiKeyConfig> apiKeys = new ArrayList<>();
 
+    /** Client-facing virtual keys (V0.4+). Supersedes {@link #apiKeys}. */
+    private List<VirtualKeyConfig> virtualKeys = new ArrayList<>();
+
     /** Upstream LLM providers available for routing. */
     private List<ProviderConfig> providers = new ArrayList<>();
 
@@ -52,6 +55,9 @@ public class MixInferProperties {
         private String baseUrl;
         private String apiKey;
         private List<String> models = new ArrayList<>();
+
+        /** Per-model pricing entries. Empty means no pricing configured. */
+        private List<PricingConfig> pricing = new ArrayList<>();
 
         /** Connect timeout in seconds. Default 5. */
         private int connectTimeoutSeconds = 5;
@@ -129,5 +135,41 @@ public class MixInferProperties {
 
         /** Seconds an unhealthy endpoint stays excluded before retry. */
         private int cooldownSeconds = 30;
+    }
+
+    /**
+     * Configuration for a client-facing virtual key (V0.4+).
+     *
+     * <p>An explicit {@code id} is required; it identifies the key in usage
+     * records and must remain stable across name changes and key rotation.
+     */
+    @Data
+    public static class VirtualKeyConfig {
+        private String id;
+        private String name;
+        private String key;
+        private RateLimitPolicyConfig rateLimit;
+    }
+
+    /**
+     * Rate limit policy for a virtual key.
+     */
+    @Data
+    public static class RateLimitPolicyConfig {
+        /** Requests allowed per minute. Zero or negative disables rate limiting. */
+        private int requestsPerMinute = 0;
+    }
+
+    /**
+     * Pricing entry for a specific upstream model under a provider.
+     *
+     * <p>Prices are expressed in microcents (1 cent = 1,000,000 microcents),
+     * per one million tokens, to avoid floating-point arithmetic.
+     */
+    @Data
+    public static class PricingConfig {
+        private String upstreamModel;
+        private long inputPricePerMillionMicrocents;
+        private long outputPricePerMillionMicrocents;
     }
 }

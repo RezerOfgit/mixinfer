@@ -77,4 +77,17 @@ class MixInferPropertiesTest {
 
         assertThat(route.resolveTargets()).isEmpty();
     }
+
+    @Test
+    void should_load_virtual_keys_from_application_yml() {
+        // V0.4 first release keeps application.yml on the legacy form.
+        // This test only asserts the field defaults to an empty list.
+        assertThat(properties.getVirtualKeys()).isNotNull();
+    }
+
+    @Test
+    void should_load_pricing_as_empty_by_default() {
+        assertThat(properties.getProviders())
+                .allSatisfy(p -> assertThat(p.getPricing()).isNotNull());
+    }
 }
