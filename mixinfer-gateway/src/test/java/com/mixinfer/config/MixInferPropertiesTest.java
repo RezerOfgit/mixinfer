@@ -18,10 +18,11 @@ class MixInferPropertiesTest {
 
     @Test
     void should_load_config_from_application_yml() {
-        assertThat(properties.getApiKeys()).isNotEmpty();
         assertThat(properties.getProviders()).isNotEmpty();
         assertThat(properties.getRoutes()).isNotEmpty();
-        assertThat(properties.getApiKeys().get(0).getKey()).isEqualTo("sk-mixinfer-dev");
+        assertThat(properties.getVirtualKeys()).isNotEmpty();
+        assertThat(properties.getVirtualKeys().get(0).getKey()).isEqualTo("sk-mixinfer-dev");
+        assertThat(properties.getVirtualKeys().get(0).getId()).isEqualTo("vk_default");
     }
 
     @Test

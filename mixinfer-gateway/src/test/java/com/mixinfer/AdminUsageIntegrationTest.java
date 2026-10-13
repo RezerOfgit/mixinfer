@@ -130,7 +130,7 @@ class AdminUsageIntegrationTest {
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(response.getBody())
                 .contains("\"model\":\"gpt-4o-mini\"")
-                .contains("\"virtualKeyId\":\"legacy-")
+                .contains("\"virtualKeyId\":\"vk_default\"")
                 .doesNotContain("sk-mixinfer-dev")
                 .doesNotContain("sk-admin-test");
     }

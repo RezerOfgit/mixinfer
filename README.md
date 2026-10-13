@@ -100,9 +100,10 @@ cd mixinfer-gateway
 
 ```yaml
 mixinfer:
-  api-keys:
-    - key: sk-mixinfer-dev    # 面向客户端的 Key
+  virtual-keys:
+    - id: vk_default
       name: default
+      key: sk-mixinfer-dev    # 面向客户端的 Key
   providers:
     - name: openai-compatible    # 实例名（route 中引用）
       type: openai-compatible    # 实现类型（默认值，可省略）

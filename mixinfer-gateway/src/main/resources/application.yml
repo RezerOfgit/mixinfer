@@ -6,9 +6,10 @@ spring:
     name: mixinfer-gateway
 
 mixinfer:
-  api-keys:
-    - key: sk-mixinfer-dev
+  virtual-keys:
+    - id: vk_default
       name: default
+      key: sk-mixinfer-dev
   providers:
     - name: openai-compatible
       base-url: https://api.deepseek.com
