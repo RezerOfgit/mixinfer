@@ -2,12 +2,15 @@ package com.mixinfer.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mixinfer.auth.ApiKeyFilter;
+import com.mixinfer.auth.VirtualKey;
+import com.mixinfer.auth.VirtualKeyRegistry;
 import com.mixinfer.converter.LlmToOpenAIConverter;
 import com.mixinfer.converter.LlmToOpenAIStreamConverter;
 import com.mixinfer.converter.OpenAIToLlmConverter;
 import com.mixinfer.domain.*;
 import com.mixinfer.exception.ClientDisconnectedException;
 import com.mixinfer.exception.ProviderException;
+import com.mixinfer.exception.RateLimitExceededException;
 import com.mixinfer.metering.AttemptLog;
 import com.mixinfer.metering.CostCalculator;
 import com.mixinfer.metering.CostResult;
@@ -18,6 +21,7 @@ import com.mixinfer.provider.LlmProvider;
 import com.mixinfer.provider.LlmStream;
 import com.mixinfer.provider.ProviderRegistry;
 import com.mixinfer.provider.StreamingLlmProvider;
+import com.mixinfer.ratelimit.RateLimiter;
 import com.mixinfer.router.Endpoint;
 import com.mixinfer.router.Pricing;
 import com.mixinfer.router.RoutePlanner;
@@ -57,6 +61,8 @@ public class ChatCompletionService {
     private final FailureClassifier failureClassifier;
     private final ObjectMapper objectMapper;
     private final CostCalculator costCalculator;
+    private final RateLimiter rateLimiter;
+    private final VirtualKeyRegistry virtualKeyRegistry;
 
     public ChatCompletionService(OpenAIToLlmConverter inboundConverter,
                                  LlmToOpenAIConverter outboundConverter,
@@ -68,7 +74,9 @@ public class ChatCompletionService {
                                  EndpointHealthTracker healthTracker,
                                  FailureClassifier failureClassifier,
                                  ObjectMapper objectMapper,
-                                 CostCalculator costCalculator) {
+                                 CostCalculator costCalculator,
+                                 RateLimiter rateLimiter,
+                                 VirtualKeyRegistry virtualKeyRegistry) {
         this.inboundConverter = inboundConverter;
         this.outboundConverter = outboundConverter;
         this.streamConverter = streamConverter;
@@ -80,6 +88,8 @@ public class ChatCompletionService {
         this.failureClassifier = failureClassifier;
         this.objectMapper = objectMapper;
         this.costCalculator = costCalculator;
+        this.rateLimiter = rateLimiter;
+        this.virtualKeyRegistry = virtualKeyRegistry;
     }
 
     public OpenAIChatResponse handle(OpenAIChatRequest request) {
@@ -87,6 +97,8 @@ public class ChatCompletionService {
         String requestId = MDC.get(RequestIdFilter.MDC_KEY);
         String virtualKeyId = MDC.get(ApiKeyFilter.MDC_KEY);
         String model = request.getModel();
+
+        enforceRateLimit(requestId, virtualKeyId, model, startedAt);
 
         LlmRequest llmRequest = inboundConverter.toLlmRequest(request);
         List<RouteTarget> ordered = routePlanner.plan(llmRequest.getModel());
@@ -205,6 +217,8 @@ public class ChatCompletionService {
         String requestId = MDC.get(RequestIdFilter.MDC_KEY);
         String virtualKeyId = MDC.get(ApiKeyFilter.MDC_KEY);
         String model = request.getModel();
+
+        enforceRateLimit(requestId, virtualKeyId, model, startedAt);
 
         LlmRequest llmRequest = inboundConverter.toLlmRequest(request);
         List<RouteTarget> ordered = routePlanner.plan(llmRequest.getModel());
@@ -363,6 +377,50 @@ public class ChatCompletionService {
                 log.warn("Usage settlement failed: {}", e.getMessage());
             }
         }
+    }
+
+    /**
+     * Enforces the rate limit for the request's virtual key.
+     *
+     * <p>On rejection, records an UNKNOWN usage record with reason
+     * {@code rate_limited} and throws {@link RateLimitExceededException}.
+     * The record's {@code success} is false; no usage is settled.
+     */
+    private void enforceRateLimit(String requestId,
+                                  String virtualKeyId,
+                                  String model,
+                                  Instant startedAt) {
+        if (virtualKeyId == null) {
+            return;
+        }
+        VirtualKey key = virtualKeyRegistry.findById(virtualKeyId).orElse(null);
+        if (key == null || key.getRateLimit() == null) {
+            return;
+        }
+
+        RateLimiter.Decision decision = rateLimiter.tryAcquire(virtualKeyId, key.getRateLimit());
+        if (decision.admitted()) {
+            return;
+        }
+
+        log.warn("Rate limit exceeded for virtualKeyId={} model={} retryAfter={}ms",
+                virtualKeyId, model, decision.retryAfter().toMillis());
+
+        usageRecorder.record(UsageRecord.builder()
+                .requestId(requestId)
+                .virtualKeyId(virtualKeyId)
+                .model(model)
+                .startedAt(startedAt)
+                .completedAt(Instant.now())
+                .settlementStatus(UsageSettlementStatus.UNKNOWN)
+                .usageSource(UsageSource.NONE)
+                .reason("rate_limited")
+                .success(false)
+                .attemptCount(0)
+                .build());
+
+        throw new RateLimitExceededException(
+                "Rate limit exceeded for virtual key", decision.retryAfter());
     }
 
     private void tryWriteErrorEvent(HttpServletResponse response, IOException cause) {

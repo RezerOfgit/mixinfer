@@ -1,6 +1,7 @@
 package com.mixinfer.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.mixinfer.auth.VirtualKeyRegistry;
 import com.mixinfer.config.MixInferProperties;
 import com.mixinfer.converter.LlmToOpenAIConverter;
 import com.mixinfer.converter.LlmToOpenAIStreamConverter;
@@ -16,6 +17,7 @@ import com.mixinfer.openai.OpenAIMessage;
 import com.mixinfer.provider.LlmStream;
 import com.mixinfer.provider.ProviderRegistry;
 import com.mixinfer.provider.StreamingLlmProvider;
+import com.mixinfer.ratelimit.InMemorySlidingWindowRateLimiter;
 import com.mixinfer.router.Endpoint;
 import com.mixinfer.router.RoutePlanner;
 import com.mixinfer.router.failure.DefaultFailureClassifier;
@@ -248,7 +250,9 @@ class ChatCompletionServiceStreamingLifecycleTest {
                 health,
                 new DefaultFailureClassifier(),
                 om,
-                new CostCalculator());
+                new CostCalculator(),
+                new InMemorySlidingWindowRateLimiter(),
+                new VirtualKeyRegistry(properties));
     }
 
     // ===================== 辅助类 =====================

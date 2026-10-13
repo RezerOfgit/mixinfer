@@ -11,6 +11,7 @@ import java.util.HashMap;
 import java.util.HexFormat;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 /**
  * Resolves a client-facing authentication secret to a {@link VirtualKey}.
@@ -31,6 +32,7 @@ import java.util.Optional;
 public class VirtualKeyRegistry {
 
     private final Map<String, VirtualKey> keysBySecret;
+    private final Map<String, VirtualKey> keysById;
 
     public VirtualKeyRegistry(MixInferProperties properties) {
         Map<String, VirtualKey> registry = new HashMap<>();
@@ -67,6 +69,8 @@ public class VirtualKeyRegistry {
         }
 
         this.keysBySecret = Map.copyOf(registry);
+        this.keysById = keysBySecret.values().stream()
+                .collect(Collectors.toUnmodifiableMap(VirtualKey::getId, v -> v));
     }
 
     /** Returns the VirtualKey for the given secret, if any. */
@@ -75,6 +79,14 @@ public class VirtualKeyRegistry {
             return Optional.empty();
         }
         return Optional.ofNullable(keysBySecret.get(secret));
+    }
+
+    /** Returns the VirtualKey for the given id, if any. */
+    public Optional<VirtualKey> findById(String id) {
+        if (id == null || id.isBlank()) {
+            return Optional.empty();
+        }
+        return Optional.ofNullable(keysById.get(id));
     }
 
     private void register(Map<String, VirtualKey> registry, VirtualKey vk) {
