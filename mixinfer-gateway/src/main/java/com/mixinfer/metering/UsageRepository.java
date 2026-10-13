@@ -2,6 +2,7 @@ package com.mixinfer.metering;
 
 import com.mixinfer.domain.UsageRecord;
 
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -20,4 +21,10 @@ public interface UsageRepository {
 
     /** Total number of records. Intended for tests and diagnostics. */
     long count();
+
+    /** Returns records matching the query, ordered by completedAt DESC. */
+    List<UsageRecord> findRecords(UsageQuery query);
+
+    /** Returns aggregate rows for the requested grouping. */
+    List<AggregateRow> aggregate(AggregateQuery query);
 }

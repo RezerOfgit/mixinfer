@@ -142,4 +142,106 @@ class SqliteUsageRepositoryTest {
                 .success(true)
                 .build();
     }
+
+    @Test
+    void should_find_records_by_model_and_status() {
+        repo.save(record("req-a", "m1", "openai-compatible", true, 10, 20, 100L));
+        repo.save(record("req-b", "m2", "openai-compatible", true, 5, 5, 50L));
+        repo.save(record("req-c", "m1", "openai-compatible", false, null, null, null));
+
+        var query = com.mixinfer.metering.UsageQuery.builder()
+                .model("m1")
+                .limit(10)
+                .build();
+
+        var results = repo.findRecords(query);
+
+        assertThat(results).hasSize(2);
+        assertThat(results).allMatch(r -> "m1".equals(r.getModel()));
+    }
+
+    @Test
+    void should_aggregate_by_model() {
+        repo.save(record("req-1", "m1", "p1", true, 10, 20, 100L));
+        repo.save(record("req-2", "m1", "p1", true, 5, 5, 50L));
+        repo.save(record("req-3", "m2", "p1", false, null, null, null));
+
+        var query = com.mixinfer.metering.AggregateQuery.builder()
+                .from(Instant.parse("2020-01-01T00:00:00Z"))
+                .to(Instant.parse("2030-01-01T00:00:00Z"))
+                .groupBy(com.mixinfer.metering.AggregateQuery.GROUP_BY_MODEL)
+                .build();
+
+        var rows = repo.aggregate(query);
+
+        assertThat(rows).hasSize(2);
+        var m1 = rows.stream().filter(r -> "m1".equals(r.getKey())).findFirst().orElseThrow();
+        assertThat(m1.getRequestCount()).isEqualTo(2);
+        assertThat(m1.getSuccessCount()).isEqualTo(2);
+        assertThat(m1.getInputTokens()).isEqualTo(15);
+        assertThat(m1.getOutputTokens()).isEqualTo(25);
+        assertThat(m1.getCostMicrocents()).isEqualTo(150L);
+    }
+
+    @Test
+    void should_aggregate_with_day_window() {
+        repo.save(recordAt("req-1", "m1",
+                Instant.parse("2026-10-13T10:00:00Z")));
+        repo.save(recordAt("req-2", "m1",
+                Instant.parse("2026-10-13T15:00:00Z")));
+        repo.save(recordAt("req-3", "m1",
+                Instant.parse("2026-10-14T09:00:00Z")));
+
+        var query = com.mixinfer.metering.AggregateQuery.builder()
+                .from(Instant.parse("2026-10-13T00:00:00Z"))
+                .to(Instant.parse("2026-10-15T00:00:00Z"))
+                .groupBy(com.mixinfer.metering.AggregateQuery.GROUP_BY_MODEL)
+                .window(com.mixinfer.metering.AggregateQuery.WINDOW_DAY)
+                .build();
+
+        var rows = repo.aggregate(query);
+
+        assertThat(rows).hasSize(2);
+        assertThat(rows.get(0).getWindowKey()).isEqualTo("2026-10-13");
+        assertThat(rows.get(0).getRequestCount()).isEqualTo(2);
+        assertThat(rows.get(1).getWindowKey()).isEqualTo("2026-10-14");
+        assertThat(rows.get(1).getRequestCount()).isEqualTo(1);
+    }
+
+    private UsageRecord record(String requestId, String model, String provider,
+                               boolean success, Integer input, Integer output, Long cost) {
+        var usage = (input == null && output == null) ? null
+                : com.mixinfer.domain.LlmUsage.builder()
+                  .promptTokens(input == null ? 0 : input)
+                  .completionTokens(output == null ? 0 : output)
+                  .totalTokens((input == null ? 0 : input) + (output == null ? 0 : output))
+                  .build();
+        return UsageRecord.builder()
+                .requestId(requestId)
+                .model(model)
+                .provider(provider)
+                .providerReported(usage)
+                .costMicrocents(cost)
+                .startedAt(Instant.parse("2026-10-13T00:00:00Z"))
+                .completedAt(Instant.parse("2026-10-13T00:00:01Z"))
+                .settlementStatus(UsageSettlementStatus.FINAL)
+                .usageSource(UsageSource.PROVIDER)
+                .success(success)
+                .attemptCount(1)
+                .build();
+    }
+
+    private UsageRecord recordAt(String requestId, String model, Instant completedAt) {
+        return UsageRecord.builder()
+                .requestId(requestId)
+                .model(model)
+                .provider("p1")
+                .startedAt(completedAt)
+                .completedAt(completedAt)
+                .settlementStatus(UsageSettlementStatus.FINAL)
+                .usageSource(UsageSource.PROVIDER)
+                .success(true)
+                .attemptCount(1)
+                .build();
+    }
 }

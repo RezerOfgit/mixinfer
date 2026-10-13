@@ -19,6 +19,8 @@ mixinfer:
     - model: deepseek-flash
       targets:
         - provider: openai-compatible
+  admin:
+    api-key: ${MIXINFER_ADMIN_KEY:}
   usage:
     file: ${MIXINFER_USAGE_FILE:logs/usage.log}
   storage:

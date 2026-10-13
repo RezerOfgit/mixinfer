@@ -4,6 +4,9 @@ import com.mixinfer.domain.LlmUsage;
 import com.mixinfer.domain.UsageRecord;
 import com.mixinfer.domain.UsageSettlementStatus;
 import com.mixinfer.domain.UsageSource;
+import com.mixinfer.metering.AggregateQuery;
+import com.mixinfer.metering.AggregateRow;
+import com.mixinfer.metering.UsageQuery;
 import com.mixinfer.metering.UsageRepository;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -11,6 +14,7 @@ import org.springframework.stereotype.Repository;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
@@ -141,5 +145,139 @@ public class SqliteUsageRepository implements UsageRepository {
                 .startedAt(startedAtMs == null ? null : Instant.ofEpochMilli(startedAtMs))
                 .completedAt(completedAtMs == null ? null : Instant.ofEpochMilli(completedAtMs))
                 .build();
+    }
+
+    @Override
+    public List<UsageRecord> findRecords(UsageQuery q) {
+        StringBuilder sql = new StringBuilder(
+                "SELECT * FROM usage_records WHERE 1=1");
+        List<Object> args = new ArrayList<>();
+
+        if (q.getRequestId() != null) {
+            sql.append(" AND request_id = ?");
+            args.add(q.getRequestId());
+        }
+        if (q.getFrom() != null) {
+            sql.append(" AND completed_at >= ?");
+            args.add(q.getFrom().toEpochMilli());
+        }
+        if (q.getTo() != null) {
+            sql.append(" AND completed_at < ?");
+            args.add(q.getTo().toEpochMilli());
+        }
+        if (q.getModel() != null) {
+            sql.append(" AND model = ?");
+            args.add(q.getModel());
+        }
+        if (q.getProvider() != null) {
+            sql.append(" AND provider = ?");
+            args.add(q.getProvider());
+        }
+        if (q.getEndpointId() != null) {
+            sql.append(" AND endpoint_id = ?");
+            args.add(q.getEndpointId());
+        }
+        if (q.getVirtualKeyId() != null) {
+            sql.append(" AND virtual_key_id = ?");
+            args.add(q.getVirtualKeyId());
+        }
+        if (q.getSuccess() != null) {
+            sql.append(" AND success = ?");
+            args.add(q.getSuccess() ? 1 : 0);
+        }
+        if (q.getSettlementStatus() != null) {
+            sql.append(" AND settlement_status = ?");
+            args.add(q.getSettlementStatus());
+        }
+
+        sql.append(" ORDER BY completed_at DESC LIMIT ? OFFSET ?");
+        args.add(q.getLimit());
+        args.add(q.getOffset());
+
+        return jdbc.query(sql.toString(), (rs, i) -> mapRow(rs), args.toArray());
+    }
+
+    @Override
+    public List<AggregateRow> aggregate(AggregateQuery q) {
+        String groupExpr = switch (q.getGroupBy()) {
+            case AggregateQuery.GROUP_BY_MODEL -> "model";
+            case AggregateQuery.GROUP_BY_PROVIDER -> "provider";
+            case AggregateQuery.GROUP_BY_ENDPOINT -> "endpoint_id";
+            case AggregateQuery.GROUP_BY_VIRTUAL_KEY -> "virtual_key_id";
+            default -> throw new IllegalArgumentException(
+                    "Invalid groupBy: " + q.getGroupBy());
+        };
+
+        String windowExpr = null;
+        if (q.getWindow() != null) {
+            windowExpr = switch (q.getWindow()) {
+                case AggregateQuery.WINDOW_HOUR ->
+                        "strftime('%Y-%m-%dT%H:00', completed_at/1000, 'unixepoch')";
+                case AggregateQuery.WINDOW_DAY ->
+                        "strftime('%Y-%m-%d', completed_at/1000, 'unixepoch')";
+                case AggregateQuery.WINDOW_MONTH ->
+                        "strftime('%Y-%m', completed_at/1000, 'unixepoch')";
+                default -> throw new IllegalArgumentException(
+                        "Invalid window: " + q.getWindow());
+            };
+        }
+
+        StringBuilder sql = new StringBuilder();
+        sql.append("SELECT ").append(groupExpr).append(" AS grp");
+        sql.append(", ").append(windowExpr == null ? "NULL" : windowExpr)
+                .append(" AS window_key");
+        sql.append(", COUNT(*) AS request_count");
+        sql.append(", SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END) AS success_count");
+        sql.append(", COALESCE(SUM(attempt_count), 0) AS attempt_count");
+        sql.append(", COALESCE(SUM(COALESCE(input_tokens, 0)), 0) AS input_tokens");
+        sql.append(", COALESCE(SUM(COALESCE(output_tokens, 0)), 0) AS output_tokens");
+        sql.append(", COALESCE(SUM(COALESCE(cost_microcents, 0)), 0) AS cost_microcents");
+        sql.append(" FROM usage_records WHERE 1=1");
+
+        List<Object> args = new ArrayList<>();
+        if (q.getFrom() != null) {
+            sql.append(" AND completed_at >= ?");
+            args.add(q.getFrom().toEpochMilli());
+        }
+        if (q.getTo() != null) {
+            sql.append(" AND completed_at < ?");
+            args.add(q.getTo().toEpochMilli());
+        }
+        if (q.getModel() != null) {
+            sql.append(" AND model = ?");
+            args.add(q.getModel());
+        }
+        if (q.getProvider() != null) {
+            sql.append(" AND provider = ?");
+            args.add(q.getProvider());
+        }
+        if (q.getVirtualKeyId() != null) {
+            sql.append(" AND virtual_key_id = ?");
+            args.add(q.getVirtualKeyId());
+        }
+
+        sql.append(" GROUP BY grp");
+        if (windowExpr != null) {
+            sql.append(", window_key");
+        }
+        sql.append(" ORDER BY ");
+        if (windowExpr != null) {
+            sql.append("window_key, grp");
+        } else {
+            sql.append("grp");
+        }
+
+        return jdbc.query(sql.toString(),
+                (rs, i) -> AggregateRow.builder()
+                        .key(rs.getString("grp"))
+                        .windowKey(rs.getString("window_key"))
+                        .requestCount(rs.getLong("request_count"))
+                        .successCount(rs.getLong("success_count"))
+                        .attemptCount(rs.getLong("attempt_count"))
+                        .inputTokens(rs.getLong("input_tokens"))
+                        .outputTokens(rs.getLong("output_tokens"))
+                        .costMicrocents(rs.getLong("cost_microcents"))
+                        .build(),
+                args.toArray());
     }
 }

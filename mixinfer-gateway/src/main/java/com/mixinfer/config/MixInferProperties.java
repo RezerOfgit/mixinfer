@@ -30,6 +30,9 @@ public class MixInferProperties {
     /** Health tracking configuration for multi-endpoint routing. */
     private HealthConfig health = new HealthConfig();
 
+    /** Admin API configuration. */
+    private AdminConfig admin = new AdminConfig();
+
     /**
      * A single client-facing API key.
      */
@@ -174,5 +177,16 @@ public class MixInferProperties {
         private String version = "unversioned";
         private long inputPricePerMillionMicrocents;
         private long outputPricePerMillionMicrocents;
+    }
+
+    /**
+     * Admin API configuration.
+     *
+     * <p>When {@code apiKey} is blank, the /admin/** endpoints are disabled.
+     * Never reuse a client-facing virtual key for admin access.
+     */
+    @Data
+    public static class AdminConfig {
+        private String apiKey;
     }
 }
