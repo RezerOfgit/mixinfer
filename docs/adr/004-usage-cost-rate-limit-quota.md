@@ -1,7 +1,7 @@
 # ADR-004: Usage Persistence, Cost Calculation, and Rate Limiting
 
-- **Status**: Proposed
-- **Date**: 2026-10-12
+- **Status**: Accepted
+- **Date**: 2026-10-13
 - **Deciders**: MixInfer Author
 - **Related**: [ADR-001](./001-use-semantic-ir.md), [ADR-002](./002-streaming-data-plane.md), [ADR-003](./003-multi-endpoint-routing.md), [architecture.md](../architecture.md)
 

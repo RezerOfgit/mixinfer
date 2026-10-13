@@ -4,13 +4,14 @@
 
 ## 状态
 
-✅ **V0.3 已发布** — Gateway Core & Reliability。
+✅ **V0.4 已发布** — Usage & Governance。
 
 - V0.1：语义 IR 与最小网关闭环
 - V0.2：流式数据平面与用量结算基础
 - V0.3：多 Endpoint 路由、Failover、被动健康追踪
+- V0.4：用量持久化、成本核算、请求限流、Admin API
 
-下一阶段：V0.4 用量与治理。
+下一阶段：V0.4.1（Quota / Budget）或 V0.5（Control Plane Foundation）。
 
 ## 为什么做 MixInfer
 
@@ -25,7 +26,8 @@ MixInfer 在协议之间保留**协议无关的内部表示（IR）**。入站�
 - [x] **V0.1** Technical MVP — 语义 IR 与最小网关闭环
 - [x] **V0.2** Streaming Foundation — 流式数据平面与用量结算基础
 - [x] **V0.3** Gateway Core & Reliability — 多 Endpoint 路由与故障转移
-- [ ] **V0.4** Usage & Governance — 用量持久化、查询、成本、限流、额度
+- [x] **V0.4** Usage & Governance — 用量持久化、成本、限流、Admin API
+- [ ] **V0.4.1** Quota & Budget — 额度累计与准入（前提：可靠性语义明确）
 - [ ] **V0.5** Control Plane Foundation — 管理入口、配置管理、极简 Console
 - [ ] **V0.6** Enterprise Foundation — Tenant、RBAC、租户隔离
 - [ ] **V0.7** Extensibility — 自定义协议、Formatter、SDK
@@ -56,7 +58,7 @@ MixInfer Gateway
 ### 方式一：Docker（推荐）
 
 ```bash
-# routing.md. 设置上游 API Key
+# 1. 设置上游 API Key
 export DEEPSEEK_API_KEY=sk-your-key-here
 
 # 2. 启动网关
@@ -78,7 +80,7 @@ curl -N -X POST http://localhost:8080/v1/chat/completions \
   -d '{
     "model": "deepseek-flash",
     "stream": true,
-    "messages": [{"role": "user", "content": "Count from routing.md to 10"}]
+    "messages": [{"role": "user", "content": "Count from 1 to 10"}]
   }'
 ```
 
@@ -141,11 +143,34 @@ routes:
 主路失败时，MixInfer 会按失败类型判断是否切换到备路。
 连接失败、超时、HTTP 5xx、HTTP 429 会触发 failover；HTTP 4xx（除 408/429）直接返回错误。
 
+## 治理能力（V0.4）
+
+MixInfer 提供三类治理能力，**均基于 Virtual Key 或 admin key 独立认证**：
+
+### 用量持久化与查询
+
+每次客户端请求结算为一条 `UsageRecord`，持久化到 SQLite。
+支持按 `requestId` / 时间范围 / model / provider / endpoint / virtualKeyId
+的明细查询，以及按 model / provider / endpoint / virtualKeyId 的聚合。
+
+### 成本核算
+
+按 (Endpoint, upstream model) 定价，每次请求结算出 `costMicrocents`。
+**未知成本记 `null`，不记 0**——避免聚合报表低估成本。
+
+### 请求限流
+
+基于滑动窗口的 per-VirtualKey 限流。**被拒请求不计入窗口**，
+`Retry-After` 从最早的有效准入时间戳计算。
+
+详见 [docs/governance.md](docs/governance.md)。
+
 ## 设计决策
 
 - [ADR-001](docs/adr/001-use-semantic-ir.md)：为什么用语义 IR，而不是协议级转换
 - [ADR-002](docs/adr/002-streaming-data-plane.md)：流式数据平面与用量结算
 - [ADR-003](docs/adr/003-multi-endpoint-routing.md)：多 Endpoint 路由与可靠性
+- [ADR-004](docs/adr/004-usage-cost-rate-limit-quota.md)：用量、成本、限流、配额与存储取舍
 
 ## 许可证
 
