@@ -2,6 +2,7 @@ package com.mixinfer.router;
 
 import com.mixinfer.config.MixInferProperties;
 import com.mixinfer.exception.RoutingException;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
@@ -16,6 +17,7 @@ import java.util.stream.Collectors;
  * priority: the first target is attempted first.
  */
 @Component
+@Slf4j
 public class ModelRouter {
 
 //    private static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(30);
@@ -77,11 +79,21 @@ public class ModelRouter {
         Map<String, Pricing> pricing = provider.getPricing().stream()
                 .collect(Collectors.toUnmodifiableMap(
                         MixInferProperties.PricingConfig::getUpstreamModel,
-                        p -> new Pricing(
-                                p.getInputPricePerMillionMicrocents(),
-                                p.getOutputPricePerMillionMicrocents(),
-                                p.getVersion()),
-                        (a, b) -> a));   // duplicates: keep the first
+                        p -> {
+                            if (p.getVersion() == null || p.getVersion().isBlank()) {
+                                throw new IllegalStateException(
+                                        "Pricing entry for model '" + p.getUpstreamModel()
+                                                + "' under provider '" + provider.getName()
+                                                + "' is missing a version. Set 'version' to a "
+                                                + "stable, reproducible identifier.");
+                            }
+                            logPricingFingerprint(provider.getName(), p);
+                            return new Pricing(
+                                    p.getInputPricePerMillionMicrocents(),
+                                    p.getOutputPricePerMillionMicrocents(),
+                                    p.getVersion());
+                        },
+                        (a, b) -> a));
 
         Endpoint endpoint = Endpoint.builder()
                 .id(provider.getName())
@@ -94,5 +106,18 @@ public class ModelRouter {
                 .build();
 
         return RouteTarget.builder().endpoint(endpoint).build();
+    }
+
+    /**
+     * Logs a fingerprint of the pricing entry so that a version string
+     * pointing to different prices is detectable after the fact.
+     */
+    private void logPricingFingerprint(String providerName,
+                                       MixInferProperties.PricingConfig p) {
+        String fingerprint = Long.toHexString(
+                (p.getInputPricePerMillionMicrocents() * 31)
+                        + p.getOutputPricePerMillionMicrocents());
+        log.info("Pricing loaded provider={} model={} version={} fingerprint={}",
+                providerName, p.getUpstreamModel(), p.getVersion(), fingerprint);
     }
 }

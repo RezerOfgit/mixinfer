@@ -174,7 +174,7 @@ public class MixInferProperties {
     @Data
     public static class PricingConfig {
         private String upstreamModel;
-        private String version = "unversioned";
+        private String version;
         private long inputPricePerMillionMicrocents;
         private long outputPricePerMillionMicrocents;
     }

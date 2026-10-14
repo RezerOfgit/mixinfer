@@ -4,6 +4,7 @@ import com.mixinfer.config.MixInferProperties;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Locale;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -109,5 +110,27 @@ class VirtualKeyRegistryTest {
         assertThat(registry.findBySecret("nope")).isEmpty();
         assertThat(registry.findBySecret(null)).isEmpty();
         assertThat(registry.findBySecret("")).isEmpty();
+    }
+
+    @Test
+    void should_generate_locale_independent_legacy_id() {
+        Locale original = Locale.getDefault();
+        try {
+            MixInferProperties p1 = new MixInferProperties();
+            MixInferProperties.ApiKeyConfig c1 = new MixInferProperties.ApiKeyConfig();
+            c1.setName("Team-I");
+            c1.setKey("k1");
+            p1.setApiKeys(List.of(c1));
+
+            Locale.setDefault(Locale.forLanguageTag("tr"));
+            String trId = new VirtualKeyRegistry(p1).findBySecret("k1").orElseThrow().getId();
+
+            Locale.setDefault(Locale.ROOT);
+            String rootId = new VirtualKeyRegistry(p1).findBySecret("k1").orElseThrow().getId();
+
+            assertThat(trId).isEqualTo(rootId);
+        } finally {
+            Locale.setDefault(original);
+        }
     }
 }

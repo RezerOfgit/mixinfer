@@ -43,7 +43,9 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(RateLimitExceededException.class)
     public ResponseEntity<OpenAIErrorResponse> handleRateLimit(
             RateLimitExceededException e) {
-        long seconds = Math.max(1, e.getRetryAfter().toSeconds());
+        // Round UP to the next second, with a floor of 1.
+        long millis = e.getRetryAfter().toMillis();
+        long seconds = Math.max(1, (millis + 999) / 1000);
         return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
                 .header("Retry-After", String.valueOf(seconds))
                 .body(OpenAIErrorResponse.of(e.getMessage(),

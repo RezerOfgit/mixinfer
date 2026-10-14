@@ -7,10 +7,7 @@ import org.springframework.stereotype.Component;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.util.HashMap;
-import java.util.HexFormat;
-import java.util.Map;
-import java.util.Optional;
+import java.util.*;
 import java.util.stream.Collectors;
 
 /**
@@ -114,7 +111,7 @@ public class VirtualKeyRegistry {
      * stable ids matter.
      */
     private static String deriveLegacyId(String name) {
-        String normalized = name == null ? "" : name.trim().toLowerCase();
+        String normalized = name == null ? "" : name.trim().toLowerCase(Locale.ROOT);
         try {
             MessageDigest md = MessageDigest.getInstance("SHA-256");
             byte[] hash = md.digest(normalized.getBytes(StandardCharsets.UTF_8));
