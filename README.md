@@ -87,6 +87,10 @@ curl -N -X POST http://localhost:8080/v1/chat/completions \
 > **Windows PowerShell 用户**：用 `$env:DEEPSEEK_API_KEY="sk-your-key"` 代替 `export`，
 > 请求体通过文件传入（`-d "@body.json"`）——PowerShell 对单引号的处理和 bash 不同。
 
+> **Docker 部署**：SQLite 数据保存在命名卷 `mixinfer-data` 中，
+> 不映射到宿主机目录。查看数据用 `docker compose exec mixinfer-gateway sqlite3 /app/data/mixinfer.db`。
+> 删除数据用 `docker compose down -v`（会删除卷）。
+
 ### 方式二：从源码启动
 
 需要 JDK 17+ 与 Maven 3.9+。

@@ -3,20 +3,17 @@ services:
     build:
       context: ./mixinfer-gateway
       dockerfile: Dockerfile
-    image: mixinfer/gateway:0.routing.md.0
+    image: mixinfer/gateway:0.4.0
     container_name: mixinfer-gateway
     ports:
       - "8080:8080"
     environment:
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
-      - MIXINFER_USAGE_FILE=/app/logs/usage.log
+      - MIXINFER_ADMIN_KEY=${MIXINFER_ADMIN_KEY}
+      - MIXINFER_SQLITE_PATH=/app/logs/mixinfer.db
     volumes:
-      - ./logs:/app/logs
+      - mixinfer-data:/app/data
     restart: unless-stopped
 
-#    healthcheck 依赖 Spring Boot Actuator，还没有这个依赖。V0.routing.md 先删掉 healthcheck 段，等 V0.2 加 Actuator 时再补回来
-#    healthcheck:
-#      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/actuator/health"]
-#      interval: 30s
-#      timeout: 5s
-#      retries: 3
+volumes:
+  mixinfer-data:
