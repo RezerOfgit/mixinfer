@@ -101,7 +101,15 @@ public class ChatCompletionService {
         enforceRateLimit(requestId, virtualKeyId, model, startedAt);
 
         LlmRequest llmRequest = inboundConverter.toLlmRequest(request);
-        List<RouteTarget> ordered = routePlanner.plan(llmRequest.getModel());
+
+        List<RouteTarget> ordered;
+        try {
+            ordered = routePlanner.plan(llmRequest.getModel());
+        } catch (RuntimeException e) {
+            recordFailure(requestId, virtualKeyId, model, startedAt,
+                    "routing_failed", null);
+            throw e;
+        }
 
         AttemptLog attempts = new AttemptLog();
         ProviderException lastError = null;
@@ -160,6 +168,8 @@ public class ChatCompletionService {
                             endpoint.getProvider(), failureType, e.getMessage());
                     attempts.recordFailure(endpoint.getProvider(), endpoint.getId(),
                             failureType.name(), e.getMessage());
+                    recordFailure(requestId, virtualKeyId, model, startedAt,
+                            "non_failoverable_provider_error", attempts);
                     throw e;
                 }
 
@@ -221,7 +231,15 @@ public class ChatCompletionService {
         enforceRateLimit(requestId, virtualKeyId, model, startedAt);
 
         LlmRequest llmRequest = inboundConverter.toLlmRequest(request);
-        List<RouteTarget> ordered = routePlanner.plan(llmRequest.getModel());
+
+        List<RouteTarget> ordered;
+        try {
+            ordered = routePlanner.plan(llmRequest.getModel());
+        } catch (RuntimeException e) {
+            recordFailure(requestId, virtualKeyId, model, startedAt,
+                    "routing_failed", null);
+            throw e;
+        }
 
         AttemptLog attempts = new AttemptLog();
 
@@ -241,7 +259,7 @@ public class ChatCompletionService {
                 StreamingLlmProvider provider = providerRegistry.getStreaming(endpoint.getProvider());
                 stream = provider.invokeStream(llmRequest, endpoint);
                 selected = endpoint;
-                attempts.recordSuccess(endpoint.getProvider(), endpoint.getId());
+                attempts.recordOpened(endpoint.getProvider(), endpoint.getId());
                 break;
 
             } catch (ProviderException e) {
@@ -252,6 +270,8 @@ public class ChatCompletionService {
                             failureType, e.getMessage());
                     attempts.recordFailure(endpoint.getProvider(), endpoint.getId(),
                             failureType.name(), e.getMessage());
+                    recordFailure(requestId, virtualKeyId, model, startedAt,
+                            "non_failoverable_provider_error", attempts);
                     throw e;
                 }
 
@@ -377,6 +397,31 @@ public class ChatCompletionService {
                 log.warn("Usage settlement failed: {}", e.getMessage());
             }
         }
+    }
+
+    /**
+     * Records a usage record for a request that failed before or during
+     * upstream invocation. Does not throw: settlement is best-effort.
+     */
+    private void recordFailure(String requestId,
+                               String virtualKeyId,
+                               String model,
+                               Instant startedAt,
+                               String reason,
+                               AttemptLog attempts) {
+        usageRecorder.record(UsageRecord.builder()
+                .requestId(requestId)
+                .virtualKeyId(virtualKeyId)
+                .model(model)
+                .startedAt(startedAt)
+                .completedAt(Instant.now())
+                .settlementStatus(UsageSettlementStatus.UNKNOWN)
+                .usageSource(UsageSource.NONE)
+                .reason(reason)
+                .success(false)
+                .attemptCount(attempts == null ? 0 : attempts.size())
+                .attempts(attempts == null ? null : attempts.toJson(objectMapper))
+                .build());
     }
 
     /**

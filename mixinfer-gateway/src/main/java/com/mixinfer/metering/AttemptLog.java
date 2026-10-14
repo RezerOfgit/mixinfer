@@ -20,6 +20,16 @@ public final class AttemptLog {
 
     private final List<Map<String, Object>> entries = new ArrayList<>();
 
+    /** Records a successful upstream open (stream created). */
+    public void recordOpened(String provider, String endpointId) {
+        Map<String, Object> entry = new LinkedHashMap<>();
+        entry.put("provider", provider);
+        entry.put("endpointId", endpointId);
+        entry.put("outcome", "opened");
+        entries.add(entry);
+    }
+
+    /** Records a completed successful request. */
     public void recordSuccess(String provider, String endpointId) {
         Map<String, Object> entry = new LinkedHashMap<>();
         entry.put("provider", provider);
