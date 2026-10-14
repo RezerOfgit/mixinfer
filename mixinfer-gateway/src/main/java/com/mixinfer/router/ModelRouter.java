@@ -87,7 +87,7 @@ public class ModelRouter {
                                                 + "' is missing a version. Set 'version' to a "
                                                 + "stable, reproducible identifier.");
                             }
-                            logPricingFingerprint(provider.getName(), p);
+                            logPricing(provider.getName(), p);
                             return new Pricing(
                                     p.getInputPricePerMillionMicrocents(),
                                     p.getOutputPricePerMillionMicrocents(),
@@ -112,12 +112,10 @@ public class ModelRouter {
      * Logs a fingerprint of the pricing entry so that a version string
      * pointing to different prices is detectable after the fact.
      */
-    private void logPricingFingerprint(String providerName,
-                                       MixInferProperties.PricingConfig p) {
-        String fingerprint = Long.toHexString(
-                (p.getInputPricePerMillionMicrocents() * 31)
-                        + p.getOutputPricePerMillionMicrocents());
-        log.info("Pricing loaded provider={} model={} version={} fingerprint={}",
-                providerName, p.getUpstreamModel(), p.getVersion(), fingerprint);
+    private void logPricing(String providerName, MixInferProperties.PricingConfig p) {
+        log.info("Pricing loaded provider={} model={} version={} input={} output={}",
+                providerName, p.getUpstreamModel(), p.getVersion(),
+                p.getInputPricePerMillionMicrocents(),
+                p.getOutputPricePerMillionMicrocents());
     }
 }
