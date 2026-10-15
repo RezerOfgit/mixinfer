@@ -152,4 +152,35 @@ class ModelRouterTest {
         assertThat(endpoint.getPricing().get("deepseek-chat").inputPricePerMillionMicrocents())
                 .isEqualTo(140_000L);
     }
+
+    @Test
+    void should_fail_fast_when_pricing_version_is_missing() {
+        MixInferProperties properties = new MixInferProperties();
+
+        MixInferProperties.ProviderConfig provider = new MixInferProperties.ProviderConfig();
+        provider.setName("deepseek");
+        provider.setBaseUrl("https://api.deepseek.com");
+        provider.setApiKey("k");
+
+        MixInferProperties.PricingConfig pricing = new MixInferProperties.PricingConfig();
+        pricing.setUpstreamModel("deepseek-chat");
+        // version 未设置
+        pricing.setInputPricePerMillionMicrocents(140_000L);
+        pricing.setOutputPricePerMillionMicrocents(280_000L);
+        provider.setPricing(java.util.List.of(pricing));
+
+        properties.setProviders(java.util.List.of(provider));
+
+        MixInferProperties.TargetConfig target = new MixInferProperties.TargetConfig();
+        target.setProvider("deepseek");
+        MixInferProperties.RouteConfig route = new MixInferProperties.RouteConfig();
+        route.setModel("deepseek-flash");
+        route.setTargets(java.util.List.of(target));
+        properties.setRoutes(java.util.List.of(route));
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(
+                        () -> new ModelRouter(properties))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("version");
+    }
 }

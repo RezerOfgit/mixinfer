@@ -79,8 +79,10 @@ class CostCalculatorTest {
     }
 
     @Test
-    void should_use_default_version_when_blank() {
-        Pricing pricing = new Pricing(1L, 1L, "  ");
-        assertThat(pricing.version()).isEqualTo("unversioned");
+    void should_reject_blank_version() {
+        org.assertj.core.api.Assertions.assertThatThrownBy(
+                        () -> new Pricing(1L, 1L, "  "))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("version");
     }
 }
