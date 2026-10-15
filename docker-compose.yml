@@ -10,7 +10,7 @@ services:
     environment:
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
       - MIXINFER_ADMIN_KEY=${MIXINFER_ADMIN_KEY}
-      - MIXINFER_SQLITE_PATH=/app/logs/mixinfer.db
+      - MIXINFER_SQLITE_PATH=/app/data/mixinfer.db
     volumes:
       - mixinfer-data:/app/data
     restart: unless-stopped
