@@ -147,6 +147,36 @@ routes:
 主路失败时，MixInfer 会按失败类型判断是否切换到备路。
 连接失败、超时、HTTP 5xx、HTTP 429 会触发 failover；HTTP 4xx（除 408/429）直接返回错误。
 
+## 部署验证
+
+启动网关后，可通过以下步骤确认"请求转发 + 用量持久化"两条链路都正常：
+
+```bash
+# 1. 发一次请求，走网关转发到上游
+curl -X POST http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer sk-mixinfer-dev" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"deepseek-flash","messages":[{"role":"user","content":"hi"}]}'
+
+# 2. 用 Admin API 查询刚写入的用量记录
+curl "http://localhost:8080/admin/usage/records?limit=10" \
+  -H "Authorization: Bearer $MIXINFER_ADMIN_KEY"
+
+# 3. 重启网关，再次查询——记录应仍然存在
+docker compose restart mixinfer-gateway
+curl "http://localhost:8080/admin/usage/records?limit=10" \
+  -H "Authorization: Bearer $MIXINFER_ADMIN_KEY"
+```
+
+**两次返回同一批记录**即代表用量持久化正常。
+
+> **说明**：
+> - Admin API 使用独立于客户端密钥的 `MIXINFER_ADMIN_KEY`
+> - SQLite 数据库位于容器内 `/app/data/mixinfer.db`，通过命名卷 `mixinfer-data` 持久化
+> - 查询能力详见 [docs/governance.md](docs/governance.md)
+
+> **PowerShell 用户**：将 `$MIXINFER_ADMIN_KEY` 替换为实际值（`$env:MIXINFER_ADMIN_KEY="..."` 设置的环境变量），并把单引号 JSON 改为文件传入（`-d "@body.json"`）。
+
 ## 治理能力（V0.4）
 
 MixInfer 提供三类治理能力，**均基于 Virtual Key 或 admin key 独立认证**：
