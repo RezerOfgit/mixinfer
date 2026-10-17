@@ -11,7 +11,7 @@ node_modules/
 .DS_Store
 
 # ----------------------------------------------------------------------
-# Java / Maven (如 mixinfer-admin)
+# Java / Maven
 # ----------------------------------------------------------------------
 .mvn/wrapper/maven-wrapper.jar
 
@@ -47,7 +47,14 @@ logs/
 .env.*
 application-local.yml
 application-local.properties
-body.json
-stream-body.json
-*.local.json
+
+# 本地请求体文件
+body*.json
 stream-body*.json
+*.local.json
+
+# SQLite 数据库文件（本地调试导出）
+*.db
+*.db-journal
+*.db-wal
+*.db-shm

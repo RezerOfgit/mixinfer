@@ -1,3 +1,5 @@
+[![CI](https://github.com/RezerOfgit/mixinfer/actions/workflows/ci.yml/badge.svg)](https://github.com/RezerOfgit/mixinfer/actions/workflows/ci.yml)
+
 # MixInfer
 
 > 可嵌入、可扩展的大模型统一接入与治理基础设施。
