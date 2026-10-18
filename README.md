@@ -207,6 +207,7 @@ MixInfer 提供三类治理能力，**均基于 Virtual Key 或 admin key 独立
 - [ADR-002](docs/adr/002-streaming-data-plane.md)：流式数据平面与用量结算
 - [ADR-003](docs/adr/003-multi-endpoint-routing.md)：多 Endpoint 路由与可靠性
 - [ADR-004](docs/adr/004-usage-cost-rate-limit-quota.md)：用量、成本、限流、配额与存储取舍
+- [竞品调研](docs/competitive-analysis.md) — 与 LiteLLM / Bifrost / Portkey / APISIX / One-API 的对比与差异化判断
 
 ## 许可证
 
