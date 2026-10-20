@@ -102,4 +102,69 @@ class SseEventParserTest {
     private static ByteArrayInputStream stream(String s) {
         return new ByteArrayInputStream(s.getBytes(StandardCharsets.UTF_8));
     }
+
+    @Test
+    void should_parse_large_data_payload_without_truncation() throws IOException {
+        // 64 KB single-line payload — larger than any typical internal
+        // buffer, and close to the upper end of real LLM tool-call results.
+        String largeContent = "x".repeat(64 * 1024);
+        String payload = "{\"content\":\"" + largeContent + "\"}";
+
+        SseEventParser parser = new SseEventParser(
+                stream("data: " + payload + "\n\n"));
+
+        String result = parser.nextData();
+
+        assertThat(result).isEqualTo(payload);
+        assertThat(result.length()).isGreaterThan(64 * 1024);
+    }
+
+    @Test
+    void should_return_empty_string_for_empty_data_value() throws IOException {
+        // Two cases:
+        //  - "data:" followed immediately by newline  -> data is ""
+        //  - "data: " (one space, then newline)       -> space stripped, data is ""
+        // Neither is "no data"; both must produce an empty event, not null.
+        SseEventParser parser = new SseEventParser(
+                stream("data:\n\ndata: \n\n"));
+
+        assertThat(parser.nextData()).isEqualTo("");
+        assertThat(parser.nextData()).isEqualTo("");
+        assertThat(parser.nextData()).isNull();
+    }
+
+    @Test
+    void should_preserve_colons_inside_data_value() throws IOException {
+        // Only the first colon separates the field name from the value.
+        // URLs and timestamps inside the JSON payload must survive intact.
+        SseEventParser parser = new SseEventParser(
+                stream("data: {\"url\":\"http://example.com:8080/path\","
+                        + "\"time\":\"12:34:56\"}\n\n"));
+
+        assertThat(parser.nextData())
+                .isEqualTo("{\"url\":\"http://example.com:8080/path\","
+                        + "\"time\":\"12:34:56\"}");
+    }
+
+    @Test
+    void should_handle_utf8_multibyte_characters() throws IOException {
+        // Chinese characters (3 UTF-8 bytes each) and emoji
+        // (surrogate pairs in Java, 4 UTF-8 bytes) must round-trip.
+        SseEventParser parser = new SseEventParser(
+                stream("data: 你好 🌍 世界\n\n"));
+
+        assertThat(parser.nextData()).isEqualTo("你好 🌍 世界");
+    }
+
+    @Test
+    void should_ignore_consecutive_blank_lines() throws IOException {
+        // Multiple blank lines between events must not produce empty events.
+        // Some upstreams pad the stream with extra newlines.
+        SseEventParser parser = new SseEventParser(
+                stream("data: a\n\n\ndata: b\n\n"));
+
+        assertThat(parser.nextData()).isEqualTo("a");
+        assertThat(parser.nextData()).isEqualTo("b");
+        assertThat(parser.nextData()).isNull();
+    }
 }
