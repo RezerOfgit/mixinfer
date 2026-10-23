@@ -72,4 +72,17 @@ final class ChatCompletionServiceTestFixtures {
         EndpointSelector sequential = c -> c;
         return new RoutePlanner(router, health, sequential);
     }
+
+    /**
+     * Captures all usage records passed to it. Useful for asserting that
+     * a failure path produced a specific settlement reason.
+     */
+    static final class CapturingUsageRecorder implements com.mixinfer.metering.UsageRecorder {
+        final java.util.List<com.mixinfer.domain.UsageRecord> records = new java.util.ArrayList<>();
+
+        @Override
+        public void record(com.mixinfer.domain.UsageRecord record) {
+            records.add(record);
+        }
+    }
 }

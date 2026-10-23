@@ -151,7 +151,7 @@ class ChatCompletionServiceStreamingLifecycleTest {
             @Override public LlmStream invokeStream(LlmRequest r, Endpoint e) { return stream; }
         };
 
-        CapturingUsageRecorder recorder = new CapturingUsageRecorder();
+        var recorder = new ChatCompletionServiceTestFixtures.CapturingUsageRecorder();
         ChatCompletionService service = buildServiceWithProvider(provider, recorder);
 
         HttpServletResponse response = Mockito.mock(HttpServletResponse.class);
@@ -196,7 +196,7 @@ class ChatCompletionServiceStreamingLifecycleTest {
             @Override public LlmStream invokeStream(LlmRequest r, Endpoint e) { return broken; }
         };
 
-        CapturingUsageRecorder recorder = new CapturingUsageRecorder();
+        var recorder = new ChatCompletionServiceTestFixtures.CapturingUsageRecorder();
         ChatCompletionService service = buildServiceWithProvider(provider, recorder);
 
         jakarta.servlet.ServletOutputStream out = new jakarta.servlet.ServletOutputStream() {

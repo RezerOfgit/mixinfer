@@ -10,6 +10,7 @@ import com.mixinfer.domain.LlmRequest;
 import com.mixinfer.domain.LlmResponse;
 import com.mixinfer.exception.ProviderException;
 import com.mixinfer.metering.CostCalculator;
+import com.mixinfer.metering.UsageRecorder;
 import com.mixinfer.openai.OpenAIChatRequest;
 import com.mixinfer.openai.OpenAIMessage;
 import com.mixinfer.provider.LlmProvider;
@@ -157,12 +158,144 @@ class ChatCompletionServiceFailoverTest {
         assertThat(openCalls.get()).isEqualTo(1);   // no failover
     }
 
+    @Test
+    void should_record_routing_failed_when_model_is_unknown() {
+        // The fixture configures route for "gpt-4o-mini" only.
+        // Requesting a different model must produce a usage record
+        // with reason routing_failed and zero attempts.
+        var recorder = new ChatCompletionServiceTestFixtures.CapturingUsageRecorder();
+
+        LlmProvider unused = new LlmProvider() {
+            @Override public String name() { return "openai-compatible"; }
+            @Override public LlmResponse invoke(LlmRequest r, Endpoint e) {
+                throw new AssertionError("Provider must not be called on routing failure");
+            }
+        };
+
+        ChatCompletionService service = buildService(unused, recorder);
+
+        OpenAIChatRequest request = new OpenAIChatRequest();
+        request.setModel("unknown-model");
+        request.setMessages(List.of(new OpenAIMessage("user", "hi")));
+
+        assertThatThrownBy(() -> service.handle(request))
+                .isInstanceOf(com.mixinfer.exception.RoutingException.class);
+
+        assertThat(recorder.records).hasSize(1);
+        var record = recorder.records.get(0);
+        assertThat(record.getReason()).isEqualTo("routing_failed");
+        assertThat(record.isSuccess()).isFalse();
+        assertThat(record.getAttemptCount()).isZero();
+        assertThat(record.getCostMicrocents()).isNull();
+        assertThat(record.getProvider()).isNull();
+        assertThat(record.getModel()).isEqualTo("unknown-model");
+    }
+
+    @Test
+    void should_record_non_failoverable_provider_error() {
+        // 401 is not failoverable. The service should:
+        //   1. call the provider once
+        //   2. record a usage record with reason non_failoverable_provider_error
+        //   3. NOT attempt the second endpoint
+        var recorder = new ChatCompletionServiceTestFixtures.CapturingUsageRecorder();
+        var calls = new AtomicInteger();
+
+        LlmProvider provider = new LlmProvider() {
+            @Override public String name() { return "openai-compatible"; }
+            @Override public LlmResponse invoke(LlmRequest r, Endpoint e) {
+                calls.incrementAndGet();
+                throw new ProviderException("auth", 401);
+            }
+        };
+
+        ChatCompletionService service = buildService(provider, recorder);
+
+        OpenAIChatRequest request = new OpenAIChatRequest();
+        request.setModel("gpt-4o-mini");
+        request.setMessages(List.of(new OpenAIMessage("user", "hi")));
+
+        assertThatThrownBy(() -> service.handle(request))
+                .isInstanceOf(ProviderException.class);
+
+        // Provider called exactly once (no failover)
+        assertThat(calls.get()).isEqualTo(1);
+
+        assertThat(recorder.records).hasSize(1);
+        var record = recorder.records.get(0);
+        assertThat(record.getReason()).isEqualTo("non_failoverable_provider_error");
+        assertThat(record.isSuccess()).isFalse();
+        assertThat(record.getAttemptCount()).isEqualTo(1);
+        assertThat(record.getCostMicrocents()).isNull();
+        assertThat(record.getAttempts())
+                .contains("AUTHENTICATION_FAILURE")
+                .contains("failure");
+    }
+
+    @Test
+    void should_not_pollute_health_on_repeated_401() {
+        MixInferProperties props = new MixInferProperties();
+        props.getHealth().setFailureThreshold(2);
+        InMemoryEndpointHealthTracker health = new InMemoryEndpointHealthTracker(props);
+
+        LlmProvider provider = new LlmProvider() {
+            @Override public String name() { return "openai-compatible"; }
+            @Override public LlmResponse invoke(LlmRequest r, Endpoint e) {
+                throw new ProviderException("auth", 401);
+            }
+        };
+
+        ChatCompletionService service = buildService(provider, health);
+
+        for (int i = 0; i < 5; i++) {
+            OpenAIChatRequest request = new OpenAIChatRequest();
+            request.setModel("gpt-4o-mini");
+            request.setMessages(List.of(new OpenAIMessage("user", "hi")));
+            assertThatThrownBy(() -> service.handle(request))
+                    .isInstanceOf(ProviderException.class);
+        }
+
+        Endpoint primary = Endpoint.builder()
+                .provider("primary")
+                .baseUrl("http://primary")
+                .apiKey("k")
+                .connectTimeout(Duration.ofSeconds(5))
+                .requestTimeout(Duration.ofSeconds(30))
+                .build();
+        Endpoint backup = Endpoint.builder()
+                .provider("backup")
+                .baseUrl("http://backup")
+                .apiKey("k")
+                .connectTimeout(Duration.ofSeconds(5))
+                .requestTimeout(Duration.ofSeconds(30))
+                .pricing(Map.of())
+                .build();
+
+        List<RouteTarget> candidates = List.of(
+                RouteTarget.builder().endpoint(primary).build(),
+                RouteTarget.builder().endpoint(backup).build());
+
+        assertThat(health.filter(candidates))
+                .as("401 must not pollute health state")
+                .hasSize(2);
+    }
+
     private ChatCompletionService buildService(LlmProvider provider) {
         return buildService(provider, ChatCompletionServiceTestFixtures.noopHealth());
     }
 
     private ChatCompletionService buildService(LlmProvider provider,
+                                               UsageRecorder recorder) {
+        return buildService(provider, ChatCompletionServiceTestFixtures.noopHealth(), recorder);
+    }
+
+    private ChatCompletionService buildService(LlmProvider provider,
                                                EndpointHealthTracker health) {
+        return buildService(provider, health, r -> {});
+    }
+
+    private ChatCompletionService buildService(LlmProvider provider,
+                                               EndpointHealthTracker health,
+                                               UsageRecorder recorder) {
         ObjectMapper om = new ObjectMapper();
         MixInferProperties properties = ChatCompletionServiceTestFixtures.twoTargetProperties();
         RoutePlanner planner = ChatCompletionServiceTestFixtures.planner(properties, health);
@@ -179,7 +312,7 @@ class ChatCompletionServiceFailoverTest {
                 planner,
                 registry,
                 new StreamingResponseWriter(om),
-                r -> {},
+                recorder,
                 health,
                 new DefaultFailureClassifier(),
                 om,
@@ -234,53 +367,5 @@ class ChatCompletionServiceFailoverTest {
                 new CostCalculator(),
                 new InMemorySlidingWindowRateLimiter(),
                 new VirtualKeyRegistry(properties));
-    }
-
-    @Test
-    void should_not_pollute_health_on_repeated_401() {
-        MixInferProperties props = new MixInferProperties();
-        props.getHealth().setFailureThreshold(2);
-        InMemoryEndpointHealthTracker health = new InMemoryEndpointHealthTracker(props);
-
-        LlmProvider provider = new LlmProvider() {
-            @Override public String name() { return "openai-compatible"; }
-            @Override public LlmResponse invoke(LlmRequest r, Endpoint e) {
-                throw new ProviderException("auth", 401);
-            }
-        };
-
-        ChatCompletionService service = buildService(provider, health);
-
-        for (int i = 0; i < 5; i++) {
-            OpenAIChatRequest request = new OpenAIChatRequest();
-            request.setModel("gpt-4o-mini");
-            request.setMessages(List.of(new OpenAIMessage("user", "hi")));
-            assertThatThrownBy(() -> service.handle(request))
-                    .isInstanceOf(ProviderException.class);
-        }
-
-        Endpoint primary = Endpoint.builder()
-                .provider("primary")
-                .baseUrl("http://primary")
-                .apiKey("k")
-                .connectTimeout(Duration.ofSeconds(5))
-                .requestTimeout(Duration.ofSeconds(30))
-                .build();
-        Endpoint backup = Endpoint.builder()
-                .provider("backup")
-                .baseUrl("http://backup")
-                .apiKey("k")
-                .connectTimeout(Duration.ofSeconds(5))
-                .requestTimeout(Duration.ofSeconds(30))
-                .pricing(Map.of())
-                .build();
-
-        List<RouteTarget> candidates = List.of(
-                RouteTarget.builder().endpoint(primary).build(),
-                RouteTarget.builder().endpoint(backup).build());
-
-        assertThat(health.filter(candidates))
-                .as("401 must not pollute health state")
-                .hasSize(2);
     }
 }
