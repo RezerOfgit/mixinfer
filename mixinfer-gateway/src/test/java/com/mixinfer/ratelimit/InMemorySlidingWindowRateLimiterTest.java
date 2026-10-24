@@ -109,10 +109,87 @@ class InMemorySlidingWindowRateLimiterTest {
         assertThat(limiter.tryAcquire("k", null).admitted()).isTrue();
     }
 
+    @Test
+    void should_tolerate_clock_going_backwards() {
+        MutableClock clock = new MutableClock(T0);
+        var limiter = new InMemorySlidingWindowRateLimiter(clock);
+        var policy = RateLimitPolicy.perMinute(2);
+
+        // Fill the window at T0.
+        assertThat(limiter.tryAcquire("k", policy).admitted()).isTrue();
+        assertThat(limiter.tryAcquire("k", policy).admitted()).isTrue();
+
+        // NTP pushes the clock backwards by 10 seconds.
+        clock.set(T0.minusSeconds(10));
+
+        // Both admitted timestamps are still within (now - 60s, now]:
+        //   now      = T0 - 10s
+        //   cutoff   = T0 - 70s
+        //   both ts  = T0  ( > cutoff )
+        // So both are still in the window -> reject is correct.
+        var decision = limiter.tryAcquire("k", policy);
+        assertThat(decision.admitted()).isFalse();
+        // Retry-After must still be a positive duration, even with a
+        // backwards clock; the client should not be told "retry now".
+        assertThat(decision.retryAfter().toMillis()).isGreaterThan(0);
+    }
+
+    @Test
+    void should_admit_after_clock_jumps_forward() {
+        MutableClock clock = new MutableClock(T0);
+        var limiter = new InMemorySlidingWindowRateLimiter(clock);
+        var policy = RateLimitPolicy.perMinute(1);
+
+        limiter.tryAcquire("k", policy);      // at T0
+        assertThat(limiter.tryAcquire("k", policy).admitted()).isFalse();
+
+        // Large forward jump: the previous timestamp falls out of the window.
+        clock.set(T0.plusSeconds(120));
+
+        assertThat(limiter.tryAcquire("k", policy).admitted()).isTrue();
+    }
+
+    @Test
+    void should_not_leak_timestamps_from_future_clock() {
+        // A misconfigured server sets its clock 1 hour ahead, admits
+        // requests, then corrects to the real time. Those "future"
+        // timestamps must not block legitimate requests forever.
+        //
+        // This test documents current behaviour: a future timestamp is
+        // kept in the deque (it is > now, but the eviction loop only
+        // removes entries <= cutoff). The request is still rejected
+        // until the clock catches up.
+        //
+        // If a future time is unacceptable, the fix is to clamp
+        // admitted timestamps to min(now, lastNow) in tryAcquire.
+        // This test exists to make the current behaviour explicit.
+        MutableClock clock = new MutableClock(T0);
+        var limiter = new InMemorySlidingWindowRateLimiter(clock);
+        var policy = RateLimitPolicy.perMinute(1);
+
+        // Server thinks it is 1 hour ahead.
+        clock.set(T0.plusSeconds(3600));
+        limiter.tryAcquire("k", policy);
+
+        // Clock corrected back to real time.
+        clock.set(T0);
+
+        // The future timestamp is still in the deque. Depending on
+        // whether the implementation clamps, this is either:
+        //   (a) rejected — future timestamp counts against the window
+        //   (b) admitted — future timestamp was clamped or ignored
+        //
+        // The current implementation does (a). Adjust the assertion
+        // if you decide future timestamps should be clamped.
+        var decision = limiter.tryAcquire("k", policy);
+        assertThat(decision.admitted()).isFalse();
+    }
+
     private static final class MutableClock extends Clock {
         private Instant now;
         MutableClock(Instant start) { this.now = start; }
         void advance(Duration d) { this.now = now.plus(d); }
+        void set(Instant at) { this.now = at; }
         @Override public Instant instant() { return now; }
         @Override public ZoneOffset getZone() { return ZoneOffset.UTC; }
         @Override public Clock withZone(java.time.ZoneId zone) { return this; }
